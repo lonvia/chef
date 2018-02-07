@@ -11,6 +11,9 @@ logpath = <%= @logpath %>
 <% if @maxretry -%>
 maxretry = <%= @maxretry %>
 <% end -%>
+<% if @findtime -%>
+findtime = <%= @findtime %>
+<% end -%>
 <% if @ignoreips -%>
 ignoreip = <%= @ignoreips.sort.join(" ") %>
 <% end -%>

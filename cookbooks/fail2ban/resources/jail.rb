@@ -25,6 +25,7 @@ property :logpath, :kind_of => String
 property :protocol, :kind_of => String
 property :ports, :kind_of => Array, :default => []
 property :maxretry, :kind_of => Integer
+property :findtime, :kind_of => Integer
 property :ignoreips, :kind_of => Array
 
 action :create do
@@ -40,6 +41,7 @@ action :create do
               :protocol => new_resource.protocol,
               :ports => new_resource.ports,
               :maxretry => new_resource.maxretry,
+              :findtime => new_resource.findtime,
               :ignoreips => new_resource.ignoreips
   end
 end
