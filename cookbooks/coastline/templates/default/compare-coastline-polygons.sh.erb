@@ -1,0 +1,45 @@
+#!/bin/sh
+#
+#  compare_coastline_polygons.sh DIR DB STARTTIME_COMPACT
+#
+# new experimental coastline diff mechanism
+# to reset remove symlink $DIR/mask-master.tiff
+
+DIR="$1"
+DB="$2"
+STARTTIME_COMPACT="$3"
+
+gdal_rasterize -q --config GDAL_CACHEMAX 1024 "$DB" -l land_polygons -te -20037508.342789244 -20037508.342789244 20037508.342789244 20037508.342789244 -init 0 -burn 255 -ts 8192 8192 -ot Byte -co COMPRESS=DEFLATE $DIR/mask-$STARTTIME_COMPACT.tiff
+
+if [ ! -r "$DIR/mask-$STARTTIME_COMPACT.tiff" ] ; then
+    echo "$STARTTIME_COMPACT: 0:0.0:0:0.0:0:0.0:0:0.0:0.0:0.0 ERROR" >> differences
+    echo "stopping coastline processing due to raster mask generation error."
+    exit 1;
+fi
+
+if [ ! -h $DIR/mask-master.tiff ] ; then
+    ln -s $DIR/mask-$STARTTIME_COMPACT.tiff $DIR/mask-master.tiff
+    echo "$STARTTIME_COMPACT: 0:0.0:0:0.0:0:0.0:0:0.0:0.0:0.0 OK" >> differences
+else
+    DIFFERENCES=`gdal_maskcompare_wm $DIR/mask-master.tiff $DIR/mask-$STARTTIME_COMPACT.tiff 20000 | grep "short version:"`
+    DIFF_RATING=`echo "$DIFFERENCES" | cut -d ":" -f 2- | cut -d ":" -f 9`
+    # check if something went wrong with maskcompare and assume error then
+    if [ -z "$DIFF_RATING" ] ; then
+        echo "$STARTTIME_COMPACT: 0:0.0:0:0.0:0:0.0:0:0.0:0.0:0.0 ERROR" >> differences
+        echo "stopping coastline processing due to maskcompare error ($DIFFERENCES)."
+        exit 1;
+    fi
+    DIFF_OK=`echo "if ($DIFF_RATING < 0.0000015) 1 else 0" | bc`
+    # next line disables use of test results
+    #DIFF_OK=1
+    if [ $DIFF_OK -eq 1 ] ; then
+        echo "$DIFFERENCES OK" | sed "s?short version?$STARTTIME_COMPACT?" >> differences
+        rm $DIR/mask-master.tiff
+        ln -s $DIR/mask-$STARTTIME_COMPACT.tiff $DIR/mask-master.tiff
+    else
+        echo "$DIFFERENCES ERROR" | sed "s?short version?$STARTTIME_COMPACT?" >> differences
+        echo "stopping coastline processing due to difference test failing ($DIFF_RATING >= 0.0000015)."
+        exit 1;
+    fi
+fi
+

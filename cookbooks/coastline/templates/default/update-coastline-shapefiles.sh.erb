@@ -1,0 +1,131 @@
+#!/bin/sh
+#
+#  update-coastline-shapefiles.sh DATADIR
+#
+
+DATADIR=<%= @datadir %>
+
+iso_date='+%Y-%m-%dT%H:%M:%S'
+
+set -e
+set -x
+
+echo "Started update-coastline-shapefiles.sh"
+date $iso_date
+
+cd $DATADIR
+
+RESULTS=$DATADIR/results
+mkdir -p $RESULTS
+
+mkshape() {
+    proj=$1
+    shapedir=$2
+    db=$3
+    layer=$4
+    layer_src=$5
+
+    if [ -z "$layer_src" ] ; then
+        layer_src=$layer
+    fi
+
+    rm -fr $shapedir
+    ogr2ogr -f "ESRI Shapefile" $shapedir $db $layer_src -nln "$layer"
+
+    gdalsrsinfo EPSG:$proj -o wkt >$shapedir/$layer.prj
+    echo "UTF-8" > $shapedir/$layer.cpg
+
+    INFO=`ogrinfo -so $shapedir/$layer.shp $layer`
+    TYPE=`echo "$db" | cut -d "-" -f 2`
+
+    if [ "$proj" = "3857" ] ; then
+        EXT_INFO=`echo "$INFO" | grep "^Extent: " | cut -d ":" -f 2-`
+        XMIN=`echo "$EXT_INFO" | cut -d "(" -f 2 | cut -d "," -f 1`
+        YMIN=`echo "$EXT_INFO" | cut -d "," -f 2 | cut -d ")" -f 1`
+        XMAX=`echo "$EXT_INFO" | cut -d "(" -f 3 | cut -d "," -f 1`
+        YMAX=`echo "$EXT_INFO" | cut -d "," -f 3 | cut -d ")" -f 1`
+
+        # this tests if the data extends beyond the 180 degree meridian 
+        # and adds '+over' to the projection definition in that case
+        IS_OVER=`echo "if ($XMIN < -20037509) 1 else 0" | bc`
+        if [ $IS_OVER -ne 0 ] ; then
+           sed -i -e 's?+no_defs"?+no_defs +over"?' $shapedir/$layer.prj
+        fi
+
+        P1=`echo "$XMIN $YMIN" | gdaltransform -s_srs "EPSG:3857" -t_srs "EPSG:4326"`
+        P2=`echo "$XMAX $YMAX" | gdaltransform -s_srs "EPSG:3857" -t_srs "EPSG:4326"`
+        LON_MIN=`echo "$P1" | cut -d " " -f 1 | LC_ALL=C xargs /usr/bin/printf "%.3f" $p`
+        LON_MAX=`echo "$P2" | cut -d " " -f 1 | LC_ALL=C xargs /usr/bin/printf "%.3f" $p`
+        LAT_MIN=`echo "$P1" | cut -d " " -f 2 | LC_ALL=C xargs /usr/bin/printf "%.3f" $p`
+        LAT_MAX=`echo "$P2" | cut -d " " -f 2 | LC_ALL=C xargs /usr/bin/printf "%.3f" $p`
+
+        XMIN=`echo "($XMIN+0.5)/1" | bc`
+        XMAX=`echo "($XMAX+0.5)/1" | bc`
+        YMIN=`echo "($YMIN+0.5)/1" | bc`
+        YMAX=`echo "($YMAX+0.5)/1" | bc`
+
+        FTYPE=`echo "$INFO" | grep "^Geometry: " | cut -d ":" -f 2- | sed "s? ??g"`
+        FCOUNT=`echo "$INFO" | grep "^Feature Count: " | cut -d ":" -f 2- | sed "s? ??g"`
+
+        LAYERS="\n\n$layer.shp:\n\n  $FCOUNT $FTYPE features\n  Mercator projection\n  Extent: ($XMIN, $YMIN) - ($XMAX, $YMAX)\n  In geographic coordinates: ($LON_MIN, $LAT_MIN) - ($LON_MAX, $LAT_MAX)"
+    else
+        EXT_INFO=`echo "$INFO" | grep "^Extent: " | cut -d ":" -f 2-`
+        XMIN=`echo "$EXT_INFO" | cut -d "(" -f 2 | cut -d "," -f 1 | LC_ALL=C xargs /usr/bin/printf "%.3f" $p`
+        YMIN=`echo "$EXT_INFO" | cut -d "," -f 2 | cut -d ")" -f 1 | LC_ALL=C xargs /usr/bin/printf "%.3f" $p`
+        XMAX=`echo "$EXT_INFO" | cut -d "(" -f 3 | cut -d "," -f 1 | LC_ALL=C xargs /usr/bin/printf "%.3f" $p`
+        YMAX=`echo "$EXT_INFO" | cut -d "," -f 3 | cut -d ")" -f 1 | LC_ALL=C xargs /usr/bin/printf "%.3f" $p`
+
+        FTYPE=`echo "$INFO" | grep "^Geometry: " | cut -d ":" -f 2- | sed "s? ??g"`
+        FCOUNT=`echo "$INFO" | grep "^Feature Count: " | cut -d ":" -f 2- | sed "s? ??g"`
+
+        LAYERS="\n\n$layer.shp:\n\n  $FCOUNT $FTYPE features\n  WGS84 geographic coordinates\n  Extent: ($XMIN, $YMIN) - ($XMAX, $YMAX)"
+    fi
+    YEAR=`date '+%Y'`
+    DATE=`osmium fileinfo -g header.option.osmosis_replication_timestamp <%= @planet %>`
+    if [ "$layer" = "land_polygons" ] ; then
+      if [ "$TYPE" = "split" ] ; then
+        CONTENT="coastline land polygons, split into smaller parts"
+      else
+        CONTENT="coastline land polygons"
+      fi
+      URL="http://openstreetmapdata.com/data/land-polygons"
+    elif [ "$layer" = "simplified_land_polygons" ] ; then
+      CONTENT="coastline land polygons, simplified for rendering at low zooms"
+      URL="http://openstreetmapdata.com/data/land-polygons"
+    elif [ "$layer" = "simplified_water_polygons" ] ; then
+      CONTENT="coastline water polygons, split and simplified for rendering at low zooms"
+      URL="http://openstreetmapdata.com/data/water-polygons"
+    elif [ "$layer" = "water_polygons" ] ; then
+      CONTENT="coastline water polygons, split into smaller parts"
+      URL="http://openstreetmapdata.com/data/water-polygons"
+    else
+      CONTENT="coastlines"
+      URL="http://openstreetmapdata.com/data/coastlines"
+    fi
+    sed -e "s?@YEAR@?${YEAR}?g;s?@URL@?${URL}?g;s?@DATE@?${DATE}?g;s?@CONTENT@?${CONTENT}?g" $BIN/README.odbl | sed "/@LAYERS@/N;s?@LAYERS@?$LAYERS?" >$shapedir/README
+
+    rm -f $shapedir.zip.new
+    zip $shapedir.zip.new $shapedir/*
+    mv $shapedir.zip.new $shapedir.zip
+    mv $shapedir.zip $RESULTS/$shapedir.zip
+}
+
+mkshape 4326 land-polygons-complete-4326 coastlines-complete-4326.db land_polygons
+mkshape 4326 land-polygons-split-4326    coastlines-split-4326.db    land_polygons
+mkshape 4326 water-polygons-split-4326   coastlines-split-4326.db    water_polygons
+
+mkshape 4326 land-polygons-split-regular-4326    coastlines-split-4326.db    land_polygons    land_polygons_regular
+mkshape 4326 water-polygons-split-regular-4326   coastlines-split-4326.db    water_polygons   water_polygons_regular
+
+mkshape 3857 land-polygons-complete-3857 coastlines-complete-3857.db land_polygons
+mkshape 3857 simplified-land-polygons-complete-3857 coastlines-complete-3857.db simplified_land_polygons
+mkshape 3857 simplified-water-polygons-complete-3857 coastlines-complete-3857.db simplified_water_polygons
+mkshape 3857 land-polygons-split-3857    coastlines-split-3857.db    land_polygons
+mkshape 3857 water-polygons-split-3857   coastlines-split-3857.db    water_polygons
+
+mkshape 4326 coastlines-split-4326       coastlines-split-4326.db    lines
+mkshape 3857 coastlines-split-3857       coastlines-split-3857.db    lines
+
+echo "Done."
+date $iso_date
+

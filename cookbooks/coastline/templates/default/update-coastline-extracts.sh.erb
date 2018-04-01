@@ -1,0 +1,70 @@
+#!/bin/sh
+#
+
+DATADIR=<%= @datadir %>
+
+iso_date='+%Y-%m-%dT%H:%M:%S'
+
+set -e
+set -x
+
+echo "Started update-coastline-extracts.sh"
+date $iso_date
+
+VERBOSE="--verbose"
+OSMC="osmcoastline $VERBOSE"
+PNGDIR="<%= @pngdir %>"
+SIMPLIFY_SQL="<%= @sqldir %>/simplify.sql"
+
+cd $DATADIR
+
+DBFILE=coastlines-debug.db
+set +e
+$OSMC --overwrite -o $DBFILE.new --write-segments=segments.dat --output-rings --max-points=0 $COASTLINES_CURRENT
+EXIT_CODE=$?
+set -e
+echo "osmcoastline exit code: $EXIT_CODE"
+
+mv $DBFILE.new $DBFILE
+
+clexport() {
+    file=$1
+    srs=$2
+    maxpoints=$3
+    overlap=$4
+    options="$5 $6"
+
+    $OSMC --overwrite -o $file.db.new --no-index --srs=$srs --max-points=$maxpoints --bbox-overlap=$overlap $options $COASTLINES_CURRENT && true
+
+    mv $file.db.new $file.db
+}
+
+# do this first since it is used for comparison check
+# the others are skipped if it fails
+clexport coastlines-split-3857 3857 1000 50 --output-lines --output-polygons=both
+
+compare-coastline-polygons.sh $PNGDIR coastlines-split-3857.db latest
+
+# for smaller than 1:1 Million use unsplit or Natural Earth Data
+clexport coastlines-complete-4326 4326 0 0
+
+clexport coastlines-split-4326 4326 1000 0.0001 --output-lines --output-polygons=both
+
+# unsplit
+clexport coastlines-complete-3857 3857 0 0
+# generate simplified version for low zoom levels
+spatialite -batch -bail -echo coastlines-complete-3857.db <$SIMPLIFY_SQL
+# invert simplified version to generate simplified water polygons
+cp coastlines-complete-3857.db coastlines-complete-3857.new.db
+poly-grid.sh coastlines-complete-3857.new.db simplified_land_polygons simplified_water_polygons -i
+mv coastlines-complete-3857.new.db coastlines-complete-3857.db
+
+# regular grid land and water polygons for easy reprojection
+cp coastlines-split-4326.db coastlines-split-4326.new.db
+poly-grid.sh coastlines-split-4326.new.db land_polygons land_polygons_regular -n
+poly-grid.sh coastlines-split-4326.new.db land_polygons water_polygons_regular -n -i
+mv coastlines-split-4326.new.db coastlines-split-4326.db
+
+echo "Done."
+date $iso_date
+

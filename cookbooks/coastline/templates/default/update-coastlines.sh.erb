@@ -1,0 +1,43 @@
+#!/bin/sh
+#
+#  coastline/update.sh DATADIR
+#
+
+DATADIR=<%= @datadir %>
+
+iso_date='+%Y-%m-%dT%H:%M:%S'
+
+export STARTTIME=`date $iso_date`
+export STARTTIME_COMPACT=`date '+%Y%m%dT%H%M%S'`
+
+export BIN="$( cd "$(dirname "$0")" ; pwd -P )"
+export PLANET=<%= @planet %>
+export COASTLINES_CURRENT=$DATADIR/coastlines.osm.pbf
+#export PNGDIR=$DATADIR/archive
+#export PNGFILE=polygons-$STARTTIME_COMPACT.png
+#export PNG=$PNGDIR/$PNGFILE
+
+export PATH=$BIN:$PATH
+
+exec ><%= @logdir %>/coastline.$STARTTIME.log 2>&1
+
+set -e
+set -x
+
+echo "Started coastline/update.sh"
+date $iso_date
+
+# Filter relevant coastline data from planet.
+osmcoastline_filter --verbose -o $DATADIR/coastlines-new.osm.pbf $PLANET &&
+mv $DATADIR/coastlines-new.osm.pbf $COASTLINES_CURRENT
+
+date $iso_date
+
+update-coastline-extracts.sh && update-coastline-shapefiles.sh
+date $iso_date
+
+#update-osmi-files.sh $DATADIR && copy-osmi-files.sh $DATADIR
+
+echo "Done."
+date $iso_date
+
