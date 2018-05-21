@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+#  icesheet/update.sh DATADIR
+#
+
+DATADIR=<%= @datadir %>
+
+iso_date='+%Y-%m-%dT%H:%M:%S'
+
+export PATH=$PATH:/usr/local/bin
+
+export STARTTIME=`date $iso_date`
+
+export BIN="$( cd "$(dirname "$0")" ; pwd -P )"
+
+export PLANET=<%= @planet %>
+export LOGDIR=<%= @logdir %>
+export STATS=$DATADIR/stats
+
+test -d $DATADIR || mkdir -p $DATADIR
+test -d $LOGDIR || mkdir -p $LOGDIR
+
+export COASTLINEDIR=$DATADIR
+export COASTLINE_SOURCE=$COASTLINEDIR/coastlines-split-3857.db
+export COASTLINE_LAYER=lines
+
+exec >$LOGDIR/icesheet.$STARTTIME.log 2>&1
+
+set -e
+set -x
+
+echo "Started icesheet/update.sh"
+date $iso_date
+
+if [ ! -r $COASTLINE_SOURCE ] ; then
+    echo "ERROR: coastline database not found!"
+    exit
+fi
+
+rm -f $DATADIR/antarctica_icesheet.db
+rm -rf $DATADIR/antarctica-icesheet-*
+
+echo "Running icesheet_proc.sh"
+date $iso_date
+
+cd $DATADIR && $BIN/icesheet_proc.sh $PLANET
+
+NOICE_CNT=`grep "^noice features converted:" $LOGDIR/icesheet.$STARTTIME.log | cut -d ":" -f 2 | sed 's? ??g'`
+GLACIER_CNT=`grep "^glacier features converted:" $LOGDIR/icesheet.$STARTTIME.log | cut -d ":" -f 2 | sed 's? ??g'`
+
+test -z "$NOICE_CNT" && NOICE_CNT=0
+test -z "$GLACIER_CNT" && GLACIER_CNT=0
+
+echo "$STARTTIME $NOICE_CNT $GLACIER_CNT" >> $STATS
+
+$BIN/update-icesheet-zip.sh $DATADIR
+
+echo "Done."
+date $iso_date

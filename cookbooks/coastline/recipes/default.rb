@@ -158,7 +158,7 @@ end
   end
 end
 
-%w[update-coastlines.sh update-coastline-extracts.sh compare-coastline-polygons.sh update-coastline-shapefiles.sh poly-grid.sh README.odbl].each do |fname|
+%w[update-coastlines.sh update-coastline-extracts.sh compare-coastline-polygons.sh update-coastline-shapefiles.sh poly-grid.sh README.odbl update-icesheet.sh].each do |fname|
   template "#{directory}/bin/#{fname}" do
     source "#{fname}.erb"
     owner "coastline"
