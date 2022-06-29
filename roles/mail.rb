@@ -26,7 +26,8 @@ default_attributes(
       "a.mx.openstreetmaps.org",
       "a.mx.osm.io"
     ],
-    :queue_run_max => 5,
+    :queue_run_max => 25,
+    :smtp_accept_max => 200,
     :smarthost_name => "mail.openstreetmap.org",
     :smarthost_via => false,
     :dns_blacklists => ["zen.spamhaus.org"],
@@ -45,6 +46,11 @@ default_attributes(
         :comment => "join.osmfoundation.org",
         :domains => ["join.osmfoundation.org"],
         :host => "ridley.ucl.openstreetmap.org"
+      },
+      :community => {
+        :comment => "community.openstreetmap.org",
+        :domains => ["community.openstreetmap.org"],
+        :host => "jakelong.dub.openstreetmap.org::2500"
       }
     },
     :dkim_selectors => {
@@ -88,6 +94,11 @@ default_attributes(
           :critical => 1000
         }
       }
+    }
+  },
+  :prometheus => {
+    :metrics => {
+      :exim_queue_limit => { :metric => 250 }
     }
   }
 )

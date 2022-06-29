@@ -8,6 +8,36 @@ groups:
         for: 5m
         labels:
           alertgroup: "prometheus"
+  - name: amsterdam
+    rules:
+      - alert: pdu current draw
+        expr: rPDU2PhaseStatusCurrent{site="amsterdam",rPDU2PhaseStatusIndex="1"} / 10 > 10
+        for: 5m
+        labels:
+          alertgroup: "amsterdam"
+        annotations:
+          current: "{{ $value | humanize }}A"
+      - alert: site current draw
+        expr: sum(rPDU2PhaseStatusCurrent{site="amsterdam",rPDU2PhaseStatusIndex="1"} / 10) > 13
+        for: 5m
+        labels:
+          alertgroup: "amsterdam"
+        annotations:
+          current: "{{ $value | humanize }}A"
+      - alert: site temperature
+        expr: min(rPDU2SensorTempHumidityStatusTempC{site="amsterdam"}) / 10 < 18 or min(rPDU2SensorTempHumidityStatusTempC{site="amsterdam"}) / 10 > 25
+        for: 5m
+        labels:
+          alertgroup: "amsterdam"
+        annotations:
+          temperature: "{{ $value | humanize }}C"
+      - alert: site humidity
+        expr: max(rPDU2SensorTempHumidityStatusRelativeHumidity{site="amsterdam"}) / 100 < 0.25 or max(rPDU2SensorTempHumidityStatusRelativeHumidity{site="amsterdam"}) / 100 > 0.65
+        for: 5m
+        labels:
+          alertgroup: "amsterdam"
+        annotations:
+          humidity: "{{ $value | humanizePercentage }}"
   - name: apache
     rules:
       - alert: apache down
@@ -22,6 +52,24 @@ groups:
           alertgroup: "{{ $labels.instance }}"
         annotations:
           busy_workers: "{{ $value | humanizePercentage }}"
+  - name: chef
+    rules:
+      - alert: chef client not running
+        expr: time() - node_systemd_timer_last_trigger_seconds{name="chef-client.timer"} > 3600
+        for: 12h
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+        annotations:
+          down_time: "{{ $value | humanizeDuration }}"
+  - name: cpu
+    rules:
+      - alert: cpu pressure
+        expr: rate(node_pressure_cpu_waiting_seconds_total[5m]) > 0.6
+        for: 15m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+        annotations:
+          pressure: "{{ $value | humanizePercentage }}"
   - name: database
     rules:
       - alert: postgres replication delay
@@ -31,6 +79,40 @@ groups:
           alertgroup: database
         annotations:
           delay: "{{ $value | humanizeDuration }}"
+  - name: fastly
+    rules:
+      - alert: error rate
+        expr: sum(rate(fastly_rt_status_group_total{status_group="5xx"}[5m])) by (service_name, datacenter) / sum(rate(fastly_rt_status_group_total[5m])) by (service_name, datacenter) > 0.005
+        for: 15m
+        labels:
+          alertgroup: fastly
+        annotations:
+          error_rate: "{{ $value | humanizePercentage }}"
+  - name: filesystem
+    rules:
+      - alert: readonly filesystem
+        expr: node_filesystem_readonly == 1
+        for: 0m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+      - alert: filesystem low on space
+        expr: node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.05
+        for: 5m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+        annotations:
+          percentage_free: "{{ $value | humanizePercentage }}"
+          free_bytes: "{{ with printf \"node_filesystem_avail_bytes{instance='%s',mountpoint='%s'}\" $labels.instance $labels.mountpoint | query }}{{ . | first | value | humanize1024 }}bytes{{end}}"
+          total_total: "{{ with printf \"node_filesystem_size_bytes{instance='%s',mountpoint='%s'}\" $labels.instance $labels.mountpoint | query }}{{ . | first | value | humanize1024 }}bytes{{end}}"
+      - alert: filesystem low on inodes
+        expr: node_filesystem_files_free / node_filesystem_files < 0.1
+        for: 5m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+        annotations:
+          percentage_free: "{{ $value | humanizePercentage }}"
+          free_inodes: "{{ with printf \"node_filesystem_files_free{instance='%s',mountpoint='%s'}\" $labels.instance $labels.mountpoint | query }}{{ . | first | value }}{{end}}"
+          total_inodes: "{{ with printf \"node_filesystem_files{instance='%s',mountpoint='%s'}\" $labels.instance $labels.mountpoint | query }}{{ . | first | value }}{{end}}"
   - name: hwmon
     rules:
       - alert: hwmon fan alarm
@@ -59,6 +141,15 @@ groups:
           in_volts: "{{ with printf \"node_hwmon_in_volts{instance='%s',chip='%s',sensor='%s'}\" $labels.instance $labels.chip $labels.sensor | query }}{{ . | first | value | humanize }}V{{end}}"
           in_min_volts: "{{ with printf \"node_hwmon_in_min_volts{instance='%s',chip='%s',sensor='%s'}\" $labels.instance $labels.chip $labels.sensor | query }}{{ . | first | value | humanize }}V{{end}}"
           in_max_volts: "{{ with printf \"node_hwmon_in_max_volts{instance='%s',chip='%s',sensor='%s'}\" $labels.instance $labels.chip $labels.sensor | query }}{{ . | first | value | humanize }}V{{end}}"
+  - name: io
+    rules:
+      - alert: io pressure
+        expr: rate(node_pressure_io_waiting_seconds_total[5m]) > 0.6
+        for: 60m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+        annotations:
+          pressure: "{{ $value | humanizePercentage }}"
   - name: ipmi
     rules:
       - alert: ipmi fan alarm
@@ -87,10 +178,36 @@ groups:
         for: 5m
         labels:
           alertgroup: "{{ $labels.instance }}"
+  - name: mail
+    rules:
+      - alert: exim queue length
+        expr: exim_queue > exim_queue_limit
+        for: 60m
+        labels:
+          alertgroup: mail
+        annotations:
+          queue_length: "{{ $value }}"
+      - alert: mailman queue length
+        expr: mailman_queue_length > 200
+        for: 60m
+        labels:
+          alertgroup: mail
+        annotations:
+          queue_length: "{{ $value }}"
   - name: mdadm
     rules:
       - alert: mdadm array inactive
         expr: node_md_state{state="inactive"} > 0
+        for: 0m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+        annotations:
+          required: "{{ with printf \"node_md_disks_required{instance='%s',device='%s'}\" $labels.instance $labels.device | query }}{{ . | first | value | humanize }} disks{{end}}"
+          active: "{{ with printf \"node_md_disks{instance='%s',device='%s',state='active'}\" $labels.instance $labels.device | query }}{{ . | first | value | humanize }} disks{{end}}"
+          failed: "{{ with printf \"node_md_disks{instance='%s',device='%s',state='failed'}\" $labels.instance $labels.device | query }}{{ . | first | value | humanize }} disks{{end}}"
+          spare: "{{ with printf \"node_md_disks{instance='%s',device='%s',state='spare'}\" $labels.instance $labels.device | query }}{{ . | first | value | humanize }} disks{{end}}"
+      - alert: mdadm array degraded
+        expr: sum (node_md_disks{state="active"}) without (state) < node_md_disks_required
         for: 0m
         labels:
           alertgroup: "{{ $labels.instance }}"
@@ -113,18 +230,18 @@ groups:
     rules:
       - alert: low memory
         expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
-        for: 5m
+        for: 15m
         labels:
           alertgroup: "{{ $labels.instance }}"
         annotations:
           memory_free: "{{ $value | humanizePercentage }}"
       - alert: memory pressure
-        expr: rate(node_vmstat_pgmajfault[1m]) > 1000
-        for: 5m
+        expr: rate(node_pressure_memory_waiting_seconds_total[5m]) > 0.6
+        for: 60m
         labels:
           alertgroup: "{{ $labels.instance }}"
         annotations:
-          major_page_faults: "{{ $value }} faults/s"
+          pressure: "{{ $value | humanizePercentage }}"
       - alert: oom kill detected
         expr: increase(node_vmstat_oom_kill[1m]) > 0
         for: 0m
@@ -169,6 +286,50 @@ groups:
           alertgroup: "{{ $labels.instance }}"
         annotations:
           entries_used: "{{ $value | humanizePercentage }}"
+  - name: planet
+    rules:
+      - alert: planet dump overdue
+        expr: time() - file_stat_modif_time_seconds{path=~"/store/planet/(pbf|planet)/.*"} > 7 * 86400 and ignoring (job, name, path) chef_role{name="planetdump"} == 1
+        for: 24h
+        labels:
+          alertgroup: planet
+        annotations:
+          overdue_by: "{{ $value | humanizeDuration }}"
+      - alert: notes dump overdue
+        expr: time() - file_stat_modif_time_seconds{path=~"/store/planet/notes/.*"} > 86400 and ignoring (job, name, path) chef_role{name="planetdump"} == 1
+        for: 6h
+        labels:
+          alertgroup: planet
+        annotations:
+          overdue_by: "{{ $value | humanizeDuration }}"
+      - alert: daily replication feed delayed
+        expr: time() - file_stat_modif_time_seconds{path=~"/store/planet/replication/day/.*"} > 86400 and ignoring (job, name, path) chef_role{name="planetdump"} == 1
+        for: 3h
+        labels:
+          alertgroup: planet
+        annotations:
+          delayed_by: "{{ $value | humanizeDuration }}"
+      - alert: hourly replication feed delayed
+        expr: time() - file_stat_modif_time_seconds{path=~"/store/planet/replication/hour/.*"} > 3600 and ignoring (job, name, path) chef_role{name="planetdump"} == 1
+        for: 30m
+        labels:
+          alertgroup: planet
+        annotations:
+          delayed_by: "{{ $value | humanizeDuration }}"
+      - alert: minutely replication feed delayed
+        expr: time() - file_stat_modif_time_seconds{path=~"/store/planet/replication/minute/.*"} > 60 and ignoring (job, name, path) chef_role{name="planetdump"} == 1
+        for: 5m
+        labels:
+          alertgroup: planet
+        annotations:
+          delayed_by: "{{ $value | humanizeDuration }}"
+      - alert: changeset replication feed delayed
+        expr: time() - file_stat_modif_time_seconds{path=~"/store/planet/replication/changesets/.*"} > 60 and ignoring (job, name, path) chef_role{name="planetdump"} == 1
+        for: 5m
+        labels:
+          alertgroup: planet
+        annotations:
+          delayed_by: "{{ $value | humanizeDuration }}"
   - name: postgresql
     rules:
       - alert: postgresql down
@@ -204,6 +365,20 @@ groups:
           alertgroup: "{{ $labels.instance }}"
         annotations:
           queries: "{{ $value }}"
+  - name: smart
+    rules:
+      - alert: smart failure
+        expr: smart_health_status == 0
+        for: 60m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+      - alert: smart ssd wearout approaching
+        expr: smart_percentage_used >= 90
+        for: 60m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+        annotations:
+          percentage_used: "{{ $value | humanizePercentage }}"
   - name: ssl
     rules:
       - alert: ssl certificate probe failed
@@ -228,11 +403,23 @@ groups:
         for: 0m
         labels:
           alertgroup: ssl
+  - name: systemd
+    rules:
+      - alert: systemd failed service
+        expr: node_systemd_unit_state{state="failed",name!="chef-client.service"} == 1
+        for: 5m
+        labels:
+          alertgroup: "{{ $labels.instance }}"
+      - alert: systemd failed service
+        expr: node_systemd_unit_state{state="failed",name="chef-client.service"} == 1
+        for: 6h
+        labels:
+          alertgroup: "{{ $labels.instance }}"
   - name: tile
     rules:
       - alert: renderd replication delay
         expr: renderd_replication_delay > 120
-        for: 5m
+        for: 15m
         labels:
           alertgroup: tile
         annotations:
@@ -258,3 +445,19 @@ groups:
           alertgroup: "{{ $labels.instance }}"
         annotations:
           skew: "{{ with printf \"node_timex_offset_seconds{instance='%s'}\" $labels.instance | query }} {{ . | humanizeDuration }}{{ end }}"
+  - name: web
+    rules:
+      - alert: web error rate
+        expr: sum(rate(api_call_count_total{status=~"50[0-8]|5[1-9][0-9]"}[5m])) by (instance) / sum(rate(api_call_count_total[5m])) by (instance) > 0.002
+        for: 5m
+        labels:
+          alertgroup: web
+        annotations:
+          error_rate: "{{ $value | humanizePercentage }}"
+      - alert: job processing rate
+        expr: rate(pg_stat_user_tables_n_tup_del{datname="openstreetmap",relname="delayed_jobs"}[5m]) / rate(pg_stat_user_tables_n_tup_ins{datname="openstreetmap",relname="delayed_jobs"}[5m]) < 0.9 and ignoring(job, name, datname, relname, schemaname, server) chef_role{name="db-master"} == 1
+        for: 15m
+        labels:
+          alertgroup: web
+        annotations:
+          job_processing_rate: "{{ $value | humanizePercentage }}"

@@ -17,6 +17,7 @@
 # limitations under the License.
 #
 
+include_recipe "ruby"
 include_recipe "wordpress"
 
 passwords = data_bag_item("stateofthemap", "passwords")
@@ -65,10 +66,10 @@ wordpress_theme "2007.stateofthemap.org-refreshwp-11" do
   revision "theme-2007"
 end
 
-wordpress_plugin "2007.stateofthemap.org-geopress" do
-  plugin "geopress"
-  site "2007.stateofthemap.org"
-end
+# wordpress_plugin "2007.stateofthemap.org-geopress" do
+#   plugin "geopress"
+#   site "2007.stateofthemap.org"
+# end
 
 directory "/srv/2008.stateofthemap.org" do
   owner "wordpress"
@@ -93,10 +94,10 @@ wordpress_theme "2008.stateofthemap.org-refreshwp-11" do
   revision "theme-2008"
 end
 
-wordpress_plugin "2008.stateofthemap.org-geopress" do
-  plugin "geopress"
-  site "2008.stateofthemap.org"
-end
+# wordpress_plugin "2008.stateofthemap.org-geopress" do
+#   plugin "geopress"
+#   site "2008.stateofthemap.org"
+# end
 
 directory "/srv/2009.stateofthemap.org" do
   owner "wordpress"
@@ -132,10 +133,10 @@ wordpress_theme "2009.stateofthemap.org-aerodrome" do
   revision "theme-2009"
 end
 
-wordpress_plugin "2009.stateofthemap.org-wp-sticky" do
-  plugin "wp-sticky"
-  site "2009.stateofthemap.org"
-end
+# wordpress_plugin "2009.stateofthemap.org-wp-sticky" do
+#   plugin "wp-sticky"
+#   site "2009.stateofthemap.org"
+# end
 
 directory "/srv/2010.stateofthemap.org" do
   owner "wordpress"
@@ -173,13 +174,14 @@ wordpress_plugin "2010.stateofthemap.org-sitepress-multilingual-cms" do
   plugin "sitepress-multilingual-cms"
   site "2010.stateofthemap.org"
   repository "https://git.openstreetmap.org/private/sitepress-multilingual-cms.git"
+  revision "master"
   not_if { kitchen? }
 end
 
-wordpress_plugin "2010.stateofthemap.org-wp-sticky" do
-  plugin "wp-sticky"
-  site "2010.stateofthemap.org"
-end
+# wordpress_plugin "2010.stateofthemap.org-wp-sticky" do
+#   plugin "wp-sticky"
+#   site "2010.stateofthemap.org"
+# end
 
 directory "/srv/2011.stateofthemap.org" do
   owner "wordpress"
@@ -217,13 +219,14 @@ wordpress_plugin "2011.stateofthemap.org-sitepress-multilingual-cms" do
   plugin "sitepress-multilingual-cms"
   site "2011.stateofthemap.org"
   repository "https://git.openstreetmap.org/private/sitepress-multilingual-cms.git"
+  revision "master"
   not_if { kitchen? }
 end
 
-wordpress_plugin "2011.stateofthemap.org-wp-sticky" do
-  plugin "wp-sticky"
-  site "2011.stateofthemap.org"
-end
+# wordpress_plugin "2011.stateofthemap.org-wp-sticky" do
+#   plugin "wp-sticky"
+#   site "2011.stateofthemap.org"
+# end
 
 directory "/srv/2012.stateofthemap.org" do
   owner "wordpress"
@@ -266,13 +269,14 @@ wordpress_plugin "2012.stateofthemap.org-sitepress-multilingual-cms" do
   plugin "sitepress-multilingual-cms"
   site "2012.stateofthemap.org"
   repository "https://git.openstreetmap.org/private/sitepress-multilingual-cms.git"
+  revision "master"
   not_if { kitchen? }
 end
 
-wordpress_plugin "2012.stateofthemap.org-wp-sticky" do
-  plugin "wp-sticky"
-  site "2012.stateofthemap.org"
-end
+# wordpress_plugin "2012.stateofthemap.org-wp-sticky" do
+#   plugin "wp-sticky"
+#   site "2012.stateofthemap.org"
+# end
 
 %w[2013].each do |year|
   git "/srv/#{year}.stateofthemap.org" do
@@ -300,8 +304,6 @@ package %w[
   gcc
   g++
   make
-  ruby
-  ruby-dev
   libssl-dev
   zlib1g-dev
   pkg-config
@@ -310,22 +312,14 @@ package %w[
 apache_module "expires"
 apache_module "rewrite"
 
-gem_package "bundler" do
-  version "1.17.3"
-end
-
-gem_package "bundler" do
-  version "2.1.4"
-end
-
-%w[2016 2017 2018 2019 2020 2021].each do |year|
+%w[2016 2017 2018 2019 2020 2021 2022].each do |year|
   git "/srv/#{year}.stateofthemap.org" do
     action :sync
     repository "https://github.com/openstreetmap/stateofthemap-#{year}.git"
     depth 1
     user "root"
     group "root"
-    notifies :run, "execute[/srv/#{year}.stateofthemap.org/Gemfile]"
+    notifies :run, "bundle_install[/srv/#{year}.stateofthemap.org]"
   end
 
   directory "/srv/#{year}.stateofthemap.org/_site" do
@@ -342,20 +336,18 @@ end
     group "nogroup"
   end
 
-  execute "/srv/#{year}.stateofthemap.org/Gemfile" do
+  bundle_install "/srv/#{year}.stateofthemap.org" do
     action :nothing
-    command "bundle install --deployment --jobs #{node[:cpu][:total]}"
-    cwd "/srv/#{year}.stateofthemap.org"
+    options "--deployment --jobs #{node[:cpu][:total]}"
     user "root"
     group "root"
-    notifies :run, "execute[/srv/#{year}.stateofthemap.org]"
+    notifies :run, "bundle_exec[/srv/#{year}.stateofthemap.org]"
     only_if { ::File.exist?("/srv/#{year}.stateofthemap.org/Gemfile") }
   end
 
-  execute "/srv/#{year}.stateofthemap.org" do
+  bundle_exec "/srv/#{year}.stateofthemap.org" do
     action :nothing
-    command "bundle exec jekyll build --trace --baseurl=https://#{year}.stateofthemap.org"
-    cwd "/srv/#{year}.stateofthemap.org"
+    command "jekyll build --trace --baseurl=https://#{year}.stateofthemap.org"
     user "nobody"
     group "nogroup"
     environment "LANG" => "C.UTF-8"

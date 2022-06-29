@@ -24,6 +24,14 @@ default_attributes(
     },
     :search => ["openstreetmap.org"]
   },
+  :prometheus => {
+    :metrics => {
+      :exim_queue_limit => {
+        :help => "Mail queue alert level",
+        :metric => 50
+      }
+    }
+  },
   :sysctl => {
     :panic => {
       :comment => "Reboot automatically after a panic",
@@ -75,7 +83,6 @@ default_attributes(
     :tune_cpu_scheduler => {
       :comment => "Tune CPU scheduler for server scheduling",
       :parameters => {
-        "kernel.sched_migration_cost_ns" => 50000000,
         "kernel.sched_autogroup_enabled" => 0
       }
     }

@@ -85,6 +85,7 @@ end
 action :restart do
   service service_name do
     action :restart
+    only_if { service_exists? }
   end
 end
 
@@ -97,8 +98,12 @@ action_class do
     end
   end
 
+  def service_exists?
+    ::File.exist?("/etc/systemd/system/#{service_name}.service")
+  end
+
   def executable_path
-    "/opt/prometheus/exporters/#{new_resource.exporter}/#{new_resource.exporter}_exporter"
+    "/opt/prometheus-exporters/exporters/#{new_resource.exporter}/#{new_resource.exporter}_exporter"
   end
 
   def executable_options
@@ -124,5 +129,5 @@ action_class do
 end
 
 def after_created
-  subscribes :restart, "git[/opt/prometheus]"
+  subscribes :restart, "git[/opt/prometheus-exporters]"
 end

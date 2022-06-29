@@ -19,6 +19,7 @@
 
 include_recipe "accounts"
 include_recipe "apache"
+include_recipe "exim"
 include_recipe "postgresql"
 include_recipe "tools"
 
@@ -35,6 +36,7 @@ package %w[
   libgd-text-perl
   libjson-xs-perl
   libmail-imapclient-perl
+  libmoo-perl
   libnet-ldap-perl
   libpdf-api2-perl
   libsoap-lite-perl
@@ -108,23 +110,21 @@ execute "/opt/otrs/bin/otrs.SetPermissions.pl" do
   only_if { File.stat("/opt/otrs/README.md").uid != Etc.getpwnam("otrs").uid }
 end
 
-execute "/opt/otrs/bin/Cron.sh" do
-  action :nothing
-  command "/opt/otrs/bin/Cron.sh restart"
+systemd_service "otrs" do
+  description "OTRS Daemon"
+  type "forking"
   user "otrs"
   group "otrs"
+  exec_start "/opt/otrs/bin/otrs.Daemon.pl start"
+  private_tmp true
+  protect_system "full"
+  protect_home true
+  read_write_paths "/var/log/exim4"
 end
 
-Dir.glob("/opt/otrs/var/cron/*.dist") do |distname|
-  name = distname.sub(".dist", "")
-
-  file name do
-    owner "otrs"
-    group "www-data"
-    mode "664"
-    content IO.read(distname)
-    notifies :run, "execute[/opt/otrs/bin/Cron.sh]"
-  end
+service "otrs" do
+  action [:enable, :start]
+  subscribes :restart, "systemd_service[otrs]"
 end
 
 ssl_certificate site do

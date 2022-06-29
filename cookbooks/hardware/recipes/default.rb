@@ -62,11 +62,13 @@ when "HP"
   package "hp-health" do
     action :install
     notifies :restart, "service[hp-health]"
+    only_if { node[:lsb][:release].to_f < 22.04 }
   end
 
   service "hp-health" do
     action [:enable, :start]
     supports :status => true, :restart => true
+    only_if { node[:lsb][:release].to_f < 22.04 }
   end
 
   if product.end_with?("Gen8", "Gen9")
@@ -199,11 +201,15 @@ service "irqbalance" do
   supports :status => false, :restart => true, :reload => false
 end
 
-# Link Layer Discovery Protocol Daemon
 package "lldpd"
+
 service "lldpd" do
   action [:start, :enable]
   supports :status => true, :restart => true, :reload => true
+end
+
+ohai_plugin "lldp" do
+  template "lldp.rb.erb"
 end
 
 tools_packages = []
@@ -352,6 +358,10 @@ nvmes = if node[:hardware][:pci]
         else
           []
         end
+
+unless nvmes.empty?
+  package "nvme-cli"
+end
 
 intel_nvmes = nvmes.select { |pci| pci[:vendor_name] == "Intel Corporation" }
 
@@ -540,16 +550,21 @@ if File.exist?("/etc/mdadm/mdadm.conf")
   end
 end
 
-template "/etc/modules" do
-  source "modules.erb"
-  owner "root"
-  group "root"
-  mode "644"
+file "/etc/modules" do
+  action :delete
 end
 
-service "kmod" do
-  action :nothing
-  subscribes :start, "template[/etc/modules]"
+node[:hardware][:modules].each do |module_name|
+  kernel_module module_name do
+    action :install
+    not_if { kitchen? }
+  end
+end
+
+node[:hardware][:blacklisted_modules].each do |module_name|
+  kernel_module module_name do
+    action :blacklist
+  end
 end
 
 if node[:hardware][:watchdog]

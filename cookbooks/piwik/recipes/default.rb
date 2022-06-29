@@ -32,13 +32,14 @@ package %w[
   php-gd
   php-xml
   php-apcu
-  unzip
 ]
 
 apache_module "expires"
 apache_module "rewrite"
 
 version = node[:piwik][:version]
+
+geoip_directory = node[:geoipupdate][:directory]
 
 directory "/opt/piwik-#{version}" do
   owner "root"
@@ -51,10 +52,10 @@ remote_file "#{Chef::Config[:file_cache_path]}/piwik-#{version}.zip" do
   not_if { ::File.exist?("/opt/piwik-#{version}/piwik") }
 end
 
-execute "unzip-piwik-#{version}" do
-  command "unzip -q #{Chef::Config[:file_cache_path]}/piwik-#{version}.zip"
-  cwd "/opt/piwik-#{version}"
-  user "root"
+archive_file "#{Chef::Config[:file_cache_path]}/piwik-#{version}.zip" do
+  destination "/opt/piwik-#{version}"
+  overwrite true
+  owner "root"
   group "root"
   not_if { ::File.exist?("/opt/piwik-#{version}/piwik") }
 end
@@ -89,16 +90,22 @@ directory "/opt/piwik-#{version}/piwik/tmp" do
   mode "0755"
 end
 
+directory "/opt/piwik-#{version}/piwik/tmp/assets" do
+  owner "www-data"
+  group "mysql"
+  mode "0750"
+end
+
 link "/opt/piwik-#{version}/piwik/misc/GeoLite2-ASN.mmdb" do
-  to "/usr/share/GeoIP/GeoLite2-ASN.mmdb"
+  to "#{geoip_directory}/GeoLite2-ASN.mmdb"
 end
 
 link "/opt/piwik-#{version}/piwik/misc/GeoLite2-City.mmdb" do
-  to "/usr/share/GeoIP/GeoLite2-City.mmdb"
+  to "#{geoip_directory}/GeoLite2-City.mmdb"
 end
 
 link "/opt/piwik-#{version}/piwik/misc/GeoLite2-Country.mmdb" do
-  to "/usr/share/GeoIP/GeoLite2-Country.mmdb"
+  to "#{geoip_directory}/GeoLite2-Country.mmdb"
 end
 
 link "/srv/piwik.openstreetmap.org" do

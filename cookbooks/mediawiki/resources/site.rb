@@ -24,7 +24,7 @@ default_action :create
 property :site, :kind_of => String, :name_property => true
 property :aliases, :kind_of => [String, Array]
 property :directory, :kind_of => String
-property :version, :kind_of => String, :default => "1.35"
+property :version, :kind_of => String, :default => "1.37"
 property :database_name, :kind_of => String, :required => true
 property :database_user, :kind_of => String, :required => [:create, :update]
 property :database_password, :kind_of => String, :required => [:create, :update]
@@ -452,7 +452,6 @@ action :create do
 
   mediawiki_extension "osmtaginfo" do
     site new_resource.site
-    template "mw-ext-osmtaginfo.inc.php.erb"
     repository "https://github.com/Firefishy/osmtaginfo.git"
     tag "live"
     update_site false
@@ -495,12 +494,20 @@ action :create do
   mediawiki_extension "VisualEditor" do
     site new_resource.site
     template "mw-ext-VisualEditor.inc.php.erb"
+    variables :version => new_resource.version
     update_site false
   end
 
   mediawiki_extension "TemplateData" do
     site new_resource.site
     update_site false
+  end
+
+  # Broken Extension - 3 April 2022 - Remove. See https://github.com/openstreetmap/chef/pull/491#issuecomment-1086759504
+  mediawiki_extension "QuickInstantCommons" do
+    site new_resource.site
+    update_site false
+    action :delete
   end
 
   cookbook_file "#{site_directory}/cc-wiki.png" do

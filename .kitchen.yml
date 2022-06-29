@@ -283,6 +283,9 @@ suites:
   - name: prometheus-server
     run_list:
       - recipe[prometheus::server]
+    attributes:
+      prometheus:
+        promscale: true
   - name: python
     run_list:
       - recipe[python::default]
@@ -298,9 +301,6 @@ suites:
   - name: spamassassin
     run_list:
       - recipe[spamassassin::default]
-  - name: squid
-    run_list:
-      - recipe[squid::default]
   - name: ssl
     run_list:
       - recipe[ssl::default]
@@ -332,9 +332,6 @@ suites:
   - name: tile
     run_list:
       - recipe[tile::default]
-  - name: tilecache
-    run_list:
-      - recipe[tilecache::default]
   - name: tilelog
     run_list:
       - recipe[tilelog::default]
@@ -347,9 +344,6 @@ suites:
   - name: trac
     run_list:
       - recipe[trac::default]
-  - name: web-backend
-    run_list:
-      - recipe[web::backend]
   - name: web-cgimap
     run_list:
       - recipe[web::cgimap]

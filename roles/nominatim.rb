@@ -26,7 +26,11 @@ default_attributes(
         :checkpoint_completion_target => "0.9",
         :jit => "off",
         :shared_buffers => "2GB",
-        :autovacuum_max_workers => "1"
+        :autovacuum_max_workers => "1",
+        :max_parallel_workers_per_gather => "0",
+        :maintenance_work_mem => "10GB",
+        :random_page_cost => "1.5",
+        :effective_cache_size => "60GB"
       }
     }
   },
@@ -62,6 +66,21 @@ default_attributes(
       :parameters => {
         "net.netfilter.nf_conntrack_max" => "196608"
       }
+    }
+  },
+  :nominatim => {
+    :dbadmins => %w[lonvia tomh],
+    :tablespaces => {
+      "dosm" => "/ssd/tablespaces/dosm",
+      "iosm" => "/ssd/tablespaces/iosm",
+      "dplace" => "/ssd/tablespaces/dplace",
+      "iplace" => "/ssd/tablespaces/iplace",
+      "daddress" => "/ssd/tablespaces/daddress",
+      "iaddress" => "/ssd/tablespaces/iaddress",
+      "dsearch" => "/ssd/tablespaces/dsearch",
+      "isearch" => "/ssd/tablespaces/isearch",
+      "daux" => "/ssd/tablespaces/daux",
+      "iaux" => "/ssd/tablespaces/iaux"
     }
   }
 )

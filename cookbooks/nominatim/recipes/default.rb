@@ -20,6 +20,7 @@
 include_recipe "accounts"
 include_recipe "munin"
 include_recipe "php::fpm"
+include_recipe "prometheus"
 
 basedir = data_bag_item("accounts", "nominatim")["home"]
 email_errors = data_bag_item("accounts", "lonvia")["email"]
@@ -165,6 +166,9 @@ package %w[
   php-pgsql
   php-intl
   php-symfony-dotenv
+  ruby
+  ruby-file-tail
+  ruby-pg
 ]
 
 source_directory = "#{basedir}/nominatim"
@@ -209,6 +213,10 @@ execute "compile_nominatim" do
   user "nominatim"
   cwd build_directory
   command "cmake #{source_directory} && make"
+end
+
+link "/usr/local/bin/nominatim" do
+  to "#{build_directory}/nominatim"
 end
 
 template "#{source_directory}/.git/hooks/post-merge" do
@@ -290,7 +298,7 @@ if node[:nominatim][:state] == "off"
     action :delete
   end
 
-  cron_d "nominatim-update-maintenance-trigger" do
+  systemd_timer "nominatim-update-maintenance-trigger" do
     action :delete
   end
 else
@@ -321,12 +329,20 @@ else
     mailto email_errors
   end
 
-  cron_d "nominatim-update-maintenance-trigger" do
-    minute "18"
-    hour "1"
+  systemd_service "nominatim-update-maintenance-trigger" do
+    description "Trigger maintenance tasks for Nominatim DB"
+    exec_start "touch #{basedir}/status/update_maintenance"
     user "nominatim"
-    command "touch #{basedir}/status/update_maintenance"
-    mailto email_errors
+  end
+
+  systemd_timer "nominatim-update-maintenance-trigger" do
+    action :create
+    description "Schedule maintenance tasks for Nominatim DB"
+    on_calendar "*-*-* 02:03:00 UTC"
+  end
+
+  service "nominatim-update-maintenance-trigger" do
+    action [:enable]
   end
 end
 
@@ -447,6 +463,17 @@ munin_plugin "nominatim_requests" do
   target "#{source_directory}/munin/nominatim_requests_querylog"
 end
 
+package "ruby-webrick"
+
+prometheus_exporter "nominatim" do
+  port 8082
+  user "www-data"
+  options [
+    "--nominatim.query-log=#{node[:nominatim][:logdir]}/query.log",
+    "--nominatim.database-name=#{node[:nominatim][:dbname]}"
+  ]
+end
+
 directory "#{basedir}/status" do
   owner "nominatim"
   group "postgres"
@@ -468,6 +495,8 @@ end
 ### QA tile generation
 
 if node[:nominatim][:enable_qa_tiles]
+  package "python3-geojson"
+
   git qa_bin_directory do
     repository node[:nominatim][:qa_repository]
     revision node[:nominatim][:qa_revision]
@@ -499,9 +528,15 @@ if node[:nominatim][:enable_qa_tiles]
     variables :outputdir => "#{qa_data_directory}/new"
   end
 
-  link "#{build_directory}/website/qa-data" do
-    to "#{qa_data_directory}/current"
-    owner "nominatim"
-    group "nominatim"
+  ssl_certificate "qa-tile.nominatim.openstreetmap.org" do
+    domains ["qa-tile.nominatim.openstreetmap.org"]
+    notifies :reload, "service[nginx]"
   end
+
+  nginx_site "qa-tiles.nominatim" do
+    template "nginx-qa-tiles.erb"
+    directory build_directory
+    variables :qa_data_directory => qa_data_directory
+  end
+
 end

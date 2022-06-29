@@ -69,6 +69,7 @@ default_attributes(
       :gregrs => { :status => :user },
       :stereo => { :status => :user },
       :dmlu => { :status => :user },
+      :antonkh => { :status => :user },
       :ooc => {
         :status => :role,
         :members => [:tomh, :blackadder, :timsc, :ollie]
@@ -121,17 +122,11 @@ default_attributes(
       :microcosms => {
         :repository => "https://github.com/openbrian/osm-microcosms.git",
         :revision => "microcosms"
-      },
-      :upload => {
-        :repository => "https://git.openstreetmap.org/public/rails.git",
-        :revision => "master",
-        :cgimap_repository => "https://github.com/zerebubuth/openstreetmap-cgimap.git",
-        :cgimap_revision => "feature/bulk_upload"
       }
     }
   },
   :postgresql => {
-    :versions => ["13"],
+    :versions => ["14"],
     :settings => {
       :defaults => {
         :max_connections => "500",
@@ -141,7 +136,7 @@ default_attributes(
         :max_stack_depth => "4MB",
         :effective_cache_size => "4GB"
       },
-      "13" => {
+      "14" => {
         :port => "5432",
         :wal_level => "logical",
         :max_replication_slots => "1"
@@ -156,6 +151,9 @@ default_attributes(
         "kernel.shmmax" => "17179869184"
       }
     }
+  },
+  :openssh => {
+    :password_authentication => true
   }
 )
 

@@ -58,11 +58,6 @@ repository_actions = Hash.new do |_, repository|
   node[:apt][:sources].include?(repository) ? :add : :remove
 end
 
-apt_repository "brightbox-ruby-ng" do
-  action repository_actions["brightbox-ruby-ng"]
-  uri "ppa:brightbox/ruby-ng"
-end
-
 apt_repository "ubuntugis-stable" do
   action repository_actions["ubuntugis-stable"]
   uri "ppa:ubuntugis/ppa"
@@ -86,21 +81,7 @@ end
 apt_repository "openstreetmap" do
   action repository_actions["openstreetmap"]
   uri "ppa:osmadmins/ppa"
-end
-
-apt_repository "squid2" do
-  action repository_actions["squid2"]
-  uri "ppa:osmadmins/squid2"
-end
-
-apt_repository "squid3" do
-  action repository_actions["squid3"]
-  uri "ppa:osmadmins/squid3"
-end
-
-apt_repository "squid4" do
-  action repository_actions["squid4"]
-  uri "ppa:osmadmins/squid4"
+  only_if { node[:lsb][:release].to_f < 22.04 }
 end
 
 apt_repository "management-component-pack" do
@@ -156,14 +137,6 @@ apt_repository "postgresql" do
   distribution "#{node[:lsb][:codename]}-pgdg"
   components ["main"]
   key "7FCC7D46ACCC4CF8"
-end
-
-apt_repository "mediawiki" do
-  action repository_actions["mediawiki"]
-  uri "https://releases.wikimedia.org/debian"
-  distribution "jessie-mediawiki"
-  components ["main"]
-  key "AF380A3036A03444"
 end
 
 apt_repository "docker" do

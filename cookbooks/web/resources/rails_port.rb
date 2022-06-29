@@ -27,7 +27,6 @@ unified_mode true
 default_action :create
 
 property :site, String, :name_property => true
-property :ruby, String, :default => "2.3"
 property :directory, String
 property :user, String
 property :group, String
@@ -51,10 +50,11 @@ property :logstash_path, String
 property :memcache_servers, Array
 property :potlatch2_key, String
 property :id_key, String
+property :id_application, String
 property :oauth_key, String
 property :oauth_application, String
 property :nominatim_url, String
-property :osrm_url, String
+property :overpass_url, String
 property :google_auth_id, String
 property :google_auth_secret, String
 property :google_openid_realm, String
@@ -71,17 +71,22 @@ property :totp_key, String
 property :csp_enforce, [true, false], :default => false
 property :csp_report_url, String
 property :piwik_configuration, Hash
+property :storage_service, String, :default => "local"
+property :storage_url, String
 property :trace_use_job_queue, [true, false], :default => false
 property :diary_feed_delay, Integer
 property :storage_configuration, Hash, :default => {}
-property :storage_service, String, :default => "local"
-property :storage_url, String
+property :avatar_storage, String
+property :trace_file_storage, String
+property :trace_image_storage, String
+property :trace_icon_storage, String
+property :avatar_storage_url, String
+property :trace_image_storage_url, String
+property :trace_icon_storage_url, String
 property :tile_cdn_url, String
 
 action :create do
   package %W[
-    ruby#{new_resource.ruby}
-    ruby#{new_resource.ruby}-dev
     imagemagick
     nodejs
     tzdata
@@ -112,18 +117,6 @@ action :create do
     gifsicle
     libjpeg-turbo-progs
   ]
-
-  gem_package "bundler#{new_resource.ruby}" do
-    package_name "bundler"
-    version "2.1.4"
-    gem_binary "gem#{new_resource.ruby}"
-    options "--format-executable"
-  end
-
-  gem_package "bundler#{new_resource.ruby}" do
-    package_name "pkg-config"
-    gem_binary "gem#{new_resource.ruby}"
-  end
 
   declare_resource :directory, rails_directory do
     owner new_resource.user
@@ -183,7 +176,7 @@ action :create do
 
     line.gsub!(/^( *)#geonames_username:.*$/, "\\1geonames_username: \"openstreetmap\"")
 
-    line.gsub!(/^( *)#maxmind_database:.*$/, "\\1maxmind_database: \"/usr/share/GeoIP/GeoLite2-Country.mmdb\"")
+    line.gsub!(/^( *)#maxmind_database:.*$/, "\\1maxmind_database: \"#{node[:geoipupdate][:directory]}/GeoLite2-Country.mmdb\"")
 
     if new_resource.gpx_dir
       line.gsub!(/^( *)gpx_trace_dir:.*$/, "\\1gpx_trace_dir: \"#{new_resource.gpx_dir}/traces\"")
@@ -214,6 +207,10 @@ action :create do
       line.gsub!(/^( *)#id_key:.*$/, "\\1id_key: \"#{new_resource.id_key}\"")
     end
 
+    if new_resource.id_application
+      line.gsub!(/^( *)#id_application:.*$/, "\\1id_application: \"#{new_resource.id_application}\"")
+    end
+
     if new_resource.oauth_key
       line.gsub!(/^( *)#oauth_key:.*$/, "\\1oauth_key: \"#{new_resource.oauth_key}\"")
     end
@@ -226,8 +223,8 @@ action :create do
       line.gsub!(/^( *)nominatim_url:.*$/, "\\1nominatim_url: \"#{new_resource.nominatim_url}\"")
     end
 
-    if new_resource.osrm_url
-      line.gsub!(/^( *)osrm_url:.*$/, "\\1osrm_url: \"#{new_resource.osrm_url}\"")
+    if new_resource.overpass_url
+      line.gsub!(/^( *)overpass_url:.*$/, "\\1overpass_url: \"#{new_resource.overpass_url}\"")
     end
 
     if new_resource.google_auth_id
@@ -303,10 +300,11 @@ action :create do
     "logstash_path",
     "potlatch2_key",
     "id_key",
+    "id_application",
     "oauth_key",
     "oauth_application",
     "nominatim_url",
-    "osrm_url",
+    "overpass_url",
     "google_auth_id",
     "google_auth_secret",
     "google_openid_realm",
@@ -326,6 +324,13 @@ action :create do
     "diary_feed_delay",
     "storage_service",
     "storage_url",
+    "avatar_storage",
+    "trace_file_storage",
+    "trace_image_storage",
+    "trace_icon_storage",
+    "avatar_storage_url",
+    "trace_image_storage_url",
+    "trace_icon_storage_url",
     "tile_cdn_url"
   ).compact.merge(
     "server_protocol" => "https",
@@ -333,7 +338,11 @@ action :create do
     "support_email" => "support@openstreetmap.org",
     "email_return_path" => "bounces@openstreetmap.org",
     "geonames_username" => "openstreetmap",
-    "maxmind_database" => "/usr/share/GeoIP/GeoLite2-Country.mmdb"
+    "maxmind_database" => "/usr/share/GeoIP/GeoLite2-Country.mmdb",
+    "max_request_area" => node[:web][:max_request_area],
+    "max_number_of_nodes" => node[:web][:max_number_of_nodes],
+    "max_number_of_way_nodes" => node[:web][:max_number_of_way_nodes],
+    "max_number_of_relation_members" => node[:web][:max_number_of_relation_members]
   )
 
   if new_resource.memcache_servers
@@ -380,21 +389,18 @@ action :create do
     end
   end
 
-  execute "#{rails_directory}/Gemfile" do
+  bundle_install "#{rails_directory}" do
     action :nothing
-    command "bundle#{new_resource.ruby} install"
-    cwd rails_directory
     user "root"
     group "root"
     environment "NOKOGIRI_USE_SYSTEM_LIBRARIES" => "yes"
-    subscribes :run, "gem_package[bundler#{new_resource.ruby}]"
     subscribes :run, "git[#{rails_directory}]"
   end
 
-  execute "#{rails_directory}/db/migrate" do
+  bundle_exec "#{rails_directory}/db/migrate" do
     action :nothing
-    command "bundle#{new_resource.ruby} exec rake db:migrate"
-    cwd rails_directory
+    directory rails_directory
+    command "rails db:migrate"
     user new_resource.user
     group new_resource.group
     subscribes :run, "git[#{rails_directory}]"
@@ -405,36 +411,36 @@ action :create do
     only_if { new_resource.build_assets }
   end
 
-  execute "#{rails_directory}/package.json" do
+  bundle_exec "#{rails_directory}/package.json" do
     action :nothing
-    command "bundle#{new_resource.ruby} exec rake yarn:install"
+    directory rails_directory
+    command "rails yarn:install"
     environment "HOME" => rails_directory,
                 "RAILS_ENV" => "production"
-    cwd rails_directory
     user new_resource.user
     group new_resource.group
     subscribes :run, "git[#{rails_directory}]"
     only_if { new_resource.build_assets }
   end
 
-  execute "#{rails_directory}/app/assets/javascripts/i18n" do
+  bundle_exec "#{rails_directory}/app/assets/javascripts/i18n" do
     action :nothing
-    command "bundle#{new_resource.ruby} exec rake i18n:js:export"
+    directory rails_directory
+    command "rails i18n:js:export"
     environment "HOME" => rails_directory,
                 "RAILS_ENV" => "production"
-    cwd rails_directory
     user new_resource.user
     group new_resource.group
     subscribes :run, "git[#{rails_directory}]"
     only_if { new_resource.build_assets }
   end
 
-  execute "#{rails_directory}/public/assets" do
+  bundle_exec "#{rails_directory}/public/assets" do
     action :nothing
-    command "bundle#{new_resource.ruby} exec rake assets:precompile"
+    directory rails_directory
+    command "rails assets:precompile"
     environment "HOME" => rails_directory,
                 "RAILS_ENV" => "production"
-    cwd rails_directory
     user new_resource.user
     group new_resource.group
     subscribes :run, "git[#{rails_directory}]"
@@ -442,8 +448,8 @@ action :create do
     subscribes :run, "file[#{rails_directory}/config/settings.local.yml]"
     subscribes :run, "file[#{rails_directory}/config/storage.yml]"
     subscribes :run, "file[#{rails_directory}/config/piwik.yml]"
-    subscribes :run, "execute[#{rails_directory}/package.json]"
-    subscribes :run, "execute[#{rails_directory}/app/assets/javascripts/i18n]"
+    subscribes :run, "bundle_exec[#{rails_directory}/package.json]"
+    subscribes :run, "bundle_exec[#{rails_directory}/app/assets/javascripts/i18n]"
     only_if { new_resource.build_assets }
   end
 
@@ -461,11 +467,11 @@ action :create do
     subscribes :restart, "file[#{rails_directory}/config/settings.local.yml]"
     subscribes :restart, "file[#{rails_directory}/config/storage.yml]"
     subscribes :restart, "file[#{rails_directory}/config/piwik.yml]"
-    subscribes :restart, "execute[#{rails_directory}/Gemfile]"
-    subscribes :restart, "execute[#{rails_directory}/db/migrate]"
-    subscribes :restart, "execute[#{rails_directory}/package.json]"
-    subscribes :restart, "execute[#{rails_directory}/app/assets/javascripts/i18n]"
-    subscribes :restart, "execute[#{rails_directory}/public/assets]"
+    subscribes :restart, "bundle_installl[#{rails_directory}]"
+    subscribes :restart, "bundle_exec[#{rails_directory}/db/migrate]"
+    subscribes :restart, "bundle_exec[#{rails_directory}/package.json]"
+    subscribes :restart, "bundle_exec[#{rails_directory}/app/assets/javascripts/i18n]"
+    subscribes :restart, "bundle_exec[#{rails_directory}/public/assets]"
     only_if { ::File.exist?("/usr/bin/passenger-config") }
   end
 

@@ -31,6 +31,7 @@ include_recipe "nodejs"
 include_recipe "php::fpm"
 include_recipe "postgresql"
 include_recipe "python"
+include_recipe "ruby"
 
 package %w[
   php-cgi
@@ -57,6 +58,7 @@ package %w[
   autoconf
   automake
   libtool
+  libargon2-dev
   libfcgi-dev
   libxml2-dev
   libmemcached-dev
@@ -201,9 +203,9 @@ search(:accounts, "*:*").each do |account|
   end
 end
 
-if node[:postgresql][:clusters][:"13/main"]
+if node[:postgresql][:clusters][:"14/main"]
   postgresql_user "apis" do
-    cluster "13/main"
+    cluster "14/main"
   end
 
   template "/usr/local/bin/cleanup-rails-assets" do
@@ -214,14 +216,12 @@ if node[:postgresql][:clusters][:"13/main"]
     mode "755"
   end
 
-  ruby_version = node[:passenger][:ruby_version]
-
   systemd_service "rails-jobs@" do
     description "Rails job queue runner"
     type "simple"
     user "apis"
     working_directory "/srv/%i.apis.dev.openstreetmap.org/rails"
-    exec_start "/usr/local/bin/bundle#{ruby_version} exec rake jobs:work"
+    exec_start "#{node[:ruby][:bundle]} exec rake jobs:work"
     restart "on-failure"
     private_tmp true
     private_devices true
@@ -247,6 +247,10 @@ if node[:postgresql][:clusters][:"13/main"]
 
   cgimap_port = 9000
 
+  Dir.glob("/srv/*.apis.dev.openstreetmap.org").each do |dir|
+    node.default_unless[:dev][:rails][File.basename(dir).split(".").first] = {}
+  end
+
   node[:dev][:rails].each do |name, details|
     database_name = details[:database] || "apis_#{name}"
     site_name = "#{name}.apis.dev.openstreetmap.org"
@@ -261,12 +265,12 @@ if node[:postgresql][:clusters][:"13/main"]
       secret_key_base = persistent_token("dev", "rails", name, "secret_key_base")
 
       postgresql_database database_name do
-        cluster "13/main"
+        cluster "14/main"
         owner "apis"
       end
 
       postgresql_extension "#{database_name}_btree_gist" do
-        cluster "13/main"
+        cluster "14/main"
         database database_name
         extension "btree_gist"
       end
@@ -302,13 +306,12 @@ if node[:postgresql][:clusters][:"13/main"]
       end
 
       rails_port site_name do
-        ruby ruby_version
         directory rails_directory
         user "apis"
         group "apis"
         repository details[:repository]
         revision details[:revision]
-        database_port node[:postgresql][:clusters][:"13/main"][:port]
+        database_port node[:postgresql][:clusters][:"14/main"][:port]
         database_name database_name
         database_username "apis"
         email_from "OpenStreetMap <web@noreply.openstreetmap.org>"
@@ -380,7 +383,7 @@ if node[:postgresql][:clusters][:"13/main"]
           group "root"
           mode "640"
           variables :cgimap_port => cgimap_port,
-                    :database_port => node[:postgresql][:clusters][:"13/main"][:port],
+                    :database_port => node[:postgresql][:clusters][:"14/main"][:port],
                     :database_name => database_name,
                     :log_directory => log_directory
           notifies :restart, "service[cgimap@#{name}]"
@@ -433,6 +436,10 @@ if node[:postgresql][:clusters][:"13/main"]
         action :delete
       end
 
+      service "rails-jobs@#{name}" do
+        action [:stop, :disable]
+      end
+
       directory site_directory do
         action :delete
         recursive true
@@ -444,7 +451,7 @@ if node[:postgresql][:clusters][:"13/main"]
 
       postgresql_database database_name do
         action :drop
-        cluster "13/main"
+        cluster "14/main"
       end
     end
   end

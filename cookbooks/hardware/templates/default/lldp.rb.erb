@@ -1,0 +1,25 @@
+require "json"
+
+Ohai.plugin(:Lldp) do
+  provides "lldp"
+
+  collect_data(:default) do
+    lldp Mash.new
+
+    json = JSON.parse(%x(/usr/sbin/lldpctl -f json))
+
+    interfaces = if json["lldp"]["interface"].is_a?(Array)
+                   json["lldp"]["interface"]
+                 else
+                   [json["lldp"]["interface"]]
+                 end
+
+    interfaces.each do |interface|
+      interface.each do |name, details|
+        lldp[name] = details
+      end
+    end
+
+    lldp
+  end
+end

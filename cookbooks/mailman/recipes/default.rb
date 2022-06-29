@@ -20,10 +20,12 @@
 require "securerandom"
 
 include_recipe "apache"
+include_recipe "prometheus"
 
 package %w[
   locales-all
   mailman
+  ruby-webrick
 ]
 
 subscribe_form_secret = persistent_token("mailman", "subscribe_form_secret")
@@ -68,4 +70,9 @@ template "/etc/cron.daily/lists-backup" do
   owner "root"
   group "root"
   mode "755"
+end
+
+prometheus_exporter "mailman" do
+  port 8083
+  user "list"
 end

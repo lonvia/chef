@@ -24,6 +24,7 @@ include_recipe "geoipupdate"
 include_recipe "munin"
 include_recipe "nodejs"
 include_recipe "passenger"
+include_recipe "ruby"
 include_recipe "tools"
 include_recipe "web::base"
 
@@ -49,7 +50,6 @@ template "/etc/cron.hourly/passenger" do
   mode "755"
 end
 
-ruby_version = node[:passenger][:ruby_version]
 rails_directory = "#{node[:web][:base_directory]}/rails"
 
 piwik = data_bag_item("web", "piwik")
@@ -66,30 +66,58 @@ storage = {
       "acl" => "public-read",
       "cache_control" => "public, max-age=31536000, immutable"
     }
+  },
+  "gps_traces" => {
+    "service" => "S3",
+    "access_key_id" => "AKIASQUXHPE7AMJQRFOS",
+    "secret_access_key" => web_passwords["aws_key"],
+    "region" => "eu-west-1",
+    "bucket" => "openstreetmap-gps-traces",
+    "use_dualstack_endpoint" => true,
+    "upload" => {
+      "acl" => "public-read",
+      "cache_control" => "public, max-age=31536000, immutable"
+    }
+  },
+  "gps_images" => {
+    "service" => "S3",
+    "access_key_id" => "AKIASQUXHPE7AMJQRFOS",
+    "secret_access_key" => web_passwords["aws_key"],
+    "region" => "eu-west-1",
+    "bucket" => "openstreetmap-gps-images",
+    "use_dualstack_endpoint" => true,
+    "upload" => {
+      "acl" => "public-read",
+      "cache_control" => "public, max-age=31536000, immutable"
+    }
   }
 }
 
+db_host = if node[:web][:status] == "database_readonly"
+            node[:web][:readonly_database_host]
+          else
+            node[:web][:database_host]
+          end
+
 rails_port "www.openstreetmap.org" do
-  ruby ruby_version
   directory rails_directory
   user "rails"
   group "rails"
   repository "https://git.openstreetmap.org/public/rails.git"
   revision "live"
-  database_host node[:web][:database_host]
+  database_host db_host
   database_name "openstreetmap"
   database_username "rails"
   database_password db_passwords["rails"]
   email_from "OpenStreetMap <web@noreply.openstreetmap.org>"
   status node[:web][:status]
   messages_domain "messages.openstreetmap.org"
-  gpx_dir "/store/rails/gpx"
-  attachments_dir "/store/rails/attachments"
   log_path "#{node[:web][:log_directory]}/rails.log"
   logstash_path "#{node[:web][:log_directory]}/rails-logstash.log"
   memcache_servers node[:web][:memcached_servers]
   potlatch2_key web_passwords["potlatch2_key"]
   id_key web_passwords["id_key"]
+  id_application web_passwords["id_application"]
   oauth_key web_passwords["oauth_key"]
   oauth_application web_passwords["oauth_application"]
   piwik_configuration "location" => piwik[:location],
@@ -112,21 +140,14 @@ rails_port "www.openstreetmap.org" do
   trace_use_job_queue true
   diary_feed_delay 12
   storage_configuration storage
-  storage_service "avatars"
-  storage_url "https://openstreetmap-user-avatars.s3.dualstack.eu-west-1.amazonaws.com"
+  avatar_storage "avatars"
+  trace_file_storage "gps_traces"
+  trace_image_storage "gps_images"
+  trace_icon_storage "gps_images"
+  avatar_storage_url "https://openstreetmap-user-avatars.s3.dualstack.eu-west-1.amazonaws.com"
+  trace_image_storage_url "https://openstreetmap-gps-images.s3.dualstack.eu-west-1.amazonaws.com"
+  overpass_url "https://query.openstreetmap.org/query-features"
 end
-
-gem_package "bundler#{ruby_version}" do
-  package_name "bundler"
-  gem_binary "gem#{ruby_version}"
-  options "--format-executable"
-end
-
-bundle = if File.exist?("/usr/bin/bundle#{ruby_version}")
-           "/usr/bin/bundle#{ruby_version}"
-         else
-           "/usr/local/bin/bundle#{ruby_version}"
-         end
 
 systemd_service "rails-jobs@" do
   description "Rails job queue runner"
@@ -134,7 +155,7 @@ systemd_service "rails-jobs@" do
   environment "RAILS_ENV" => "production", "QUEUE" => "%I"
   user "rails"
   working_directory rails_directory
-  exec_start "#{bundle} exec rake jobs:work"
+  exec_start "#{node[:ruby][:bundle]} exec rake jobs:work"
   restart "on-failure"
   private_tmp true
   private_devices true

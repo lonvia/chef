@@ -53,9 +53,15 @@ wordpress_plugin "blog.openstreetmap.org-google-analytics-for-wordpress" do
 end
 
 wordpress_plugin "blog.openstreetmap.org-google-sitemap-generator" do
+  action :delete
   plugin "google-sitemap-generator"
   site "blog.openstreetmap.org"
 end
+
+# wordpress_plugin "blog.openstreetmap.org-www-xml-sitemap-generator-org" do
+#   plugin "www-xml-sitemap-generator-org"
+#   site "blog.openstreetmap.org"
+# end
 
 wordpress_plugin "blog.openstreetmap.org-shareadraft" do
   plugin "shareadraft"
@@ -66,6 +72,7 @@ wordpress_plugin "blog.openstreetmap.org-sitepress-multilingual-cms" do
   plugin "sitepress-multilingual-cms"
   site "blog.openstreetmap.org"
   repository "https://git.openstreetmap.org/private/sitepress-multilingual-cms.git"
+  revision "master"
   not_if { kitchen? }
 end
 

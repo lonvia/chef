@@ -364,6 +364,11 @@ queue_only = true
 queue_run_max = <%= node[:exim][:queue_run_max] %>
 
 
+# Maximum number of simultaneous SMTP connections
+
+smtp_accept_max = <%= node[:exim][:smtp_accept_max] %>
+
+
 
 ######################################################################
 #                       ACL CONFIGURATION                            #
@@ -720,6 +725,7 @@ remote_smtp:
 
 signed_smtp:
   driver = smtp
+  connect_timeout = 1m
   dkim_domain = ${lookup{${domain:$h_from:}}partial-lsearch{/etc/exim4/dkim-domains}{$value}}
   dkim_selector = ${lookup{$dkim_domain}lsearch{/etc/exim4/dkim-selectors}{$value}}
   dkim_private_key = /etc/exim4/dkim-keys/${dkim_domain}
@@ -779,7 +785,7 @@ noreply:
   to = $sender_address
   subject = Re: $header_subject:
   headers = MIME-Version: 1.0\nContent-Type: text/plain; charset=utf-8
-  file = /etc/exim4/noreply/$local_part_data
+  file = ${lookup{$local_part}dsearch,filter=file,ret=full{/etc/exim4/noreply}}
   user = Debian-exim
   group = Debian-exim
 

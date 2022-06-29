@@ -36,7 +36,7 @@ mediawiki_site "wiki.osmfoundation.org" do
   database_password passwords["wiki"]["database"]
   admin_password passwords["wiki"]["admin"]
   skin "OSMFoundation"
-  logo "/Wiki.png"
+  logo "/w/skins/OSMFoundation/img/logo.png"
   email_contact "webmaster@openstreetmap.org"
   email_sender "webmaster@openstreetmap.org"
   email_sender_name "OSMF Wiki"
@@ -44,6 +44,7 @@ mediawiki_site "wiki.osmfoundation.org" do
   recaptcha_public_key "6LflIQATAAAAAMXyDWpba-FgipVzE-aGF4HIR59N"
   recaptcha_private_key passwords["wiki"]["recaptcha"]
   extra_file_extensions ["mp3"]
+  version "1.37"
 end
 
 mediawiki_skin "osmf" do
