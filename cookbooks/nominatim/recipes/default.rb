@@ -169,8 +169,6 @@ if node[:nominatim][:flatnode_file]
   end
 end
 
-
-
 # Normally syncing via chef is a bad idea because syncing might involve
 # an update of database functions which should not be done while an update
 # is ongoing. Therefore we sync in between update cycles. There is an
@@ -292,7 +290,6 @@ template "/etc/logrotate.d/nginx" do
   group "root"
   mode "644"
 end
-
 
 # Updates
 
@@ -440,11 +437,10 @@ if node[:nominatim][:state] == "master"
   end
 end
 
-
 # Maintenance
 
 cron_d "nominatim-backup" do
-  action (node[:nominatim][:enable_backup] and node[:nominatim][:state] != "off")  ? :create : :delete
+  action (node[:nominatim][:enable_backup] && node[:nominatim][:state] != "off") ? :create : :delete
   minute "0"
   hour "3"
   day "1"
@@ -454,7 +450,7 @@ cron_d "nominatim-backup" do
 end
 
 cron_d "nominatim-vacuum-db" do
-  action node[:nominatim][:state] != "off"  ? :create : :delete
+  action node[:nominatim][:state] != "off" ? :create : :delete
   minute "20"
   hour "0"
   user "postgres"
@@ -472,7 +468,6 @@ end
   end
 end
 
-
 # Logging
 
 template "/etc/logrotate.d/nominatim" do
@@ -481,7 +476,6 @@ template "/etc/logrotate.d/nominatim" do
   group "root"
   mode "644"
 end
-
 
 # Monitoring
 
