@@ -523,4 +523,3 @@ fail2ban_jail "nominatim_limit_req" do
   maxretry 20
   ignoreips frontend_addresses.flatten.sort
 end
-
