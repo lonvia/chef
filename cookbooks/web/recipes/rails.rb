@@ -21,7 +21,6 @@ include_recipe "apache"
 include_recipe "apt"
 include_recipe "git"
 include_recipe "geoipupdate"
-include_recipe "munin"
 include_recipe "nodejs"
 include_recipe "passenger"
 include_recipe "ruby"
@@ -32,27 +31,19 @@ web_passwords = data_bag_item("web", "passwords")
 db_passwords = data_bag_item("db", "passwords")
 
 ssl_certificate "www.openstreetmap.org" do
-  domains ["www.openstreetmap.org", "www.osm.org",
+  domains ["www.openstreetmap.org", "www.osm.org", "www.openstreetmap.com",
            "api.openstreetmap.org", "api.osm.org",
            "maps.openstreetmap.org", "maps.osm.org",
            "mapz.openstreetmap.org", "mapz.osm.org",
-           "openstreetmap.org", "osm.org"]
+           "openstreetmap.org", "osm.org", "openstreetmap.com"]
   notifies :reload, "service[apache2]"
 end
 
 nodejs_package "svgo"
 
-template "/etc/cron.hourly/passenger" do
-  cookbook "web"
-  source "passenger.cron.erb"
-  owner "root"
-  group "root"
-  mode "755"
-end
-
 rails_directory = "#{node[:web][:base_directory]}/rails"
 
-piwik = data_bag_item("web", "piwik")
+matomo = data_bag_item("web", "matomo")
 
 storage = {
   "avatars" => {
@@ -120,21 +111,25 @@ rails_port "www.openstreetmap.org" do
   id_application web_passwords["id_application"]
   oauth_key web_passwords["oauth_key"]
   oauth_application web_passwords["oauth_application"]
-  piwik_configuration "location" => piwik[:location],
-                      "site" => piwik[:site],
-                      "goals" => piwik[:goals].to_hash
+  matomo_configuration "location" => matomo[:location],
+                       "site" => matomo[:site],
+                       "visitor_cookie_timeout" => matomo[:visitor_cookie_timeout],
+                       "referral_cookie_timeout" => matomo[:referral_cookie_timeout],
+                       "session_cookie_timeout" => matomo[:session_cookie_timeout],
+                       "goals" => matomo[:goals].to_hash
   google_auth_id "651529786092-6c5ahcu0tpp95emiec8uibg11asmk34t.apps.googleusercontent.com"
   google_auth_secret web_passwords["google_auth_secret"]
   google_openid_realm "https://www.openstreetmap.org"
   facebook_auth_id "427915424036881"
   facebook_auth_secret web_passwords["facebook_auth_secret"]
-  windowslive_auth_id "0000000040153C51"
-  windowslive_auth_secret web_passwords["windowslive_auth_secret"]
+  microsoft_auth_id "e34f14f1-f790-40f3-9fa4-3c5f1a027c38"
+  microsoft_auth_secret web_passwords["microsoft_auth_secret"]
   github_auth_id "acf7da34edee99e35499"
   github_auth_secret web_passwords["github_auth_secret"]
   wikipedia_auth_id "e4fe0c2c5855d23ed7e1f1c0fa1f1c58"
   wikipedia_auth_secret web_passwords["wikipedia_auth_secret"]
   thunderforest_key web_passwords["thunderforest_key"]
+  tracestrack_key web_passwords["tracestrack_key"]
   totp_key web_passwords["totp_key"]
   csp_enforce true
   trace_use_job_queue true
@@ -147,21 +142,44 @@ rails_port "www.openstreetmap.org" do
   avatar_storage_url "https://openstreetmap-user-avatars.s3.dualstack.eu-west-1.amazonaws.com"
   trace_image_storage_url "https://openstreetmap-gps-images.s3.dualstack.eu-west-1.amazonaws.com"
   overpass_url "https://query.openstreetmap.org/query-features"
+  overpass_credentials true
+  signup_ip_per_day 24
+  signup_ip_max_burst 48
+  signup_email_per_day 1
+  signup_email_max_burst 2
+  doorkeeper_signing_key web_passwords["openid_connect_key"].join("\n")
+  user_account_deletion_delay 7 * 24
+  # Requests to modify the imagery blacklist should come from the DWG only
+  imagery_blacklist [
+    # Current Google imagery URLs have google or googleapis in the domain
+    ".*\\.google(apis)?\\..*/.*",
+    # Blacklist VWorld
+    "http://xdworld\\.vworld\\.kr:8080/.*",
+    # Blacklist here
+    ".*\\.here\\.com[/:].*",
+    # Blacklist Mapy.cz
+    ".*\\.mapy\\.cz.*",
+    # Blacklist Yandex
+    ".*\\.api-maps\\.yandex\\.ru/.*",
+    ".*\\.maps\\.yandex\\.net/.*"
+  ]
 end
 
 systemd_service "rails-jobs@" do
   description "Rails job queue runner"
   type "simple"
-  environment "RAILS_ENV" => "production", "QUEUE" => "%I"
+  environment "RAILS_ENV" => "production",
+              "QUEUE" => "%I",
+              "SLEEP_DELAY" => "60",
+              "SECRET_KEY_BASE" => web_passwords["secret_key_base"]
   user "rails"
   working_directory rails_directory
-  exec_start "#{node[:ruby][:bundle]} exec rake jobs:work"
+  exec_start "#{node[:ruby][:bundle]} exec rails jobs:work"
   restart "on-failure"
-  private_tmp true
-  private_devices true
-  protect_system "full"
-  protect_home true
-  no_new_privileges true
+  nice 10
+  sandbox :enable_network => true
+  memory_deny_write_execute false
+  read_write_paths "/var/log/web"
 end
 
 package "libjson-xs-perl"
@@ -173,8 +191,13 @@ template "/usr/local/bin/cleanup-rails-assets" do
   mode "755"
 end
 
-gem_package "apachelogregex"
-gem_package "file-tail"
+gem_package "apachelogregex" do
+  gem_binary node[:ruby][:gem]
+end
+
+gem_package "file-tail" do
+  gem_binary node[:ruby][:gem]
+end
 
 template "/usr/local/bin/api-statistics" do
   source "api-statistics.erb"
@@ -188,12 +211,12 @@ systemd_service "api-statistics" do
   user "rails"
   group "adm"
   exec_start "/usr/local/bin/api-statistics"
-  private_tmp true
-  private_devices true
-  private_network true
-  protect_system "full"
-  protect_home true
-  no_new_privileges true
+  nice 10
+  sandbox true
+  read_write_paths [
+    "/srv/www.openstreetmap.org/rails/tmp",
+    "/var/lib/prometheus/node-exporter"
+  ]
   restart "on-failure"
 end
 
@@ -204,15 +227,6 @@ service "api-statistics" do
   subscribes :restart, "systemd_service[api-statistics]"
 end
 
-gem_package "hpricot"
-
-munin_plugin "api_calls_status"
-munin_plugin "api_calls_num"
-
-munin_plugin "api_calls_#{node[:hostname]}" do
-  target "api_calls_"
-end
-
-munin_plugin "api_waits_#{node[:hostname]}" do
-  target "api_waits_"
+gem_package "hpricot" do
+  gem_binary node[:ruby][:gem]
 end

@@ -19,6 +19,10 @@
 
 include_recipe "geoipupdate"
 
+servers = search(:node, "roles:geodns").collect(&:name).sort
+
+servers << "dummy.example.com" if servers.empty?
+
 package %w[
   gdnsd
 ]
@@ -29,7 +33,7 @@ directory "/etc/gdnsd/config.d" do
   mode "755"
 end
 
-%w[tile nominatim].each do |zone|
+%w[nominatim].each do |zone|
   %w[map resource weighted].each do |type|
     template "/etc/gdnsd/config.d/#{zone}.#{type}" do
       action :create_if_missing
@@ -55,6 +59,7 @@ template "/etc/gdnsd/zones/geo.openstreetmap.org" do
   owner "root"
   group "root"
   mode "644"
+  variables :servers => servers
   notifies :restart, "service[gdnsd]"
 end
 
@@ -69,11 +74,8 @@ systemd_service "gdnsd-reload" do
   user "root"
   exec_start "/bin/systemctl reload-or-restart gdnsd"
   standard_output "null"
-  private_tmp true
-  private_devices true
-  protect_system "full"
-  protect_home true
-  no_new_privileges true
+  sandbox true
+  restrict_address_families "AF_UNIX"
 end
 
 systemd_path "gdnsd-reload" do
@@ -88,16 +90,14 @@ end
 
 firewall_rule "accept-dns-udp" do
   action :accept
-  source "net"
-  dest "fw"
-  proto "udp"
+  context :incoming
+  protocol :udp
   dest_ports "domain"
 end
 
 firewall_rule "accept-dns-tcp" do
   action :accept
-  source "net"
-  dest "fw"
-  proto "tcp:syn"
+  context :incoming
+  protocol :tcp
   dest_ports "domain"
 end

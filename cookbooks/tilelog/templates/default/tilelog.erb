@@ -3,7 +3,8 @@ set -e
 
 if [ -z "$DATE" ]
 then
-  DATE=$(date -d "1 day ago" "+%Y-%m-%d")
+  DATE=$(date -u -d "1 day ago" "+%Y-%m-%d")
+  YEAR=$(date -u -d "1 day ago" "+%Y")
 fi
 
 OUTDIR="<%= @output_dir %>"
@@ -17,10 +18,18 @@ export AWS_REGION="eu-west-1"
 
 TILEFILE="tiles-${DATE}.txt.xz"
 HOSTFILE="hosts-${DATE}.csv"
+APPFILE="apps-${DATE}.csv"
+COUNTRYFILE="countries-${DATE}.csv"
 
 nice -n 19 /opt/tilelog/bin/tilelog --date "${DATE}" \
-  --tile "${TILEFILE}" --host "${HOSTFILE}"
+  --generate-success --generate-minimise --generate-location \
+  --tile "${TILEFILE}" --host "${HOSTFILE}" --app "${APPFILE}" --country "${COUNTRYFILE}"
 
-mv "${TILEFILE}" "${HOSTFILE}" "${OUTDIR}"
+mv "${TILEFILE}" "${HOSTFILE}" "${APPFILE}" "${COUNTRYFILE}" "${OUTDIR}"
+
+/opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "${OUTDIR}/${TILEFILE}" "s3://osm-planet-eu-central-1/tile_logs/standard_layer/tiles/${YEAR}/${TILEFILE}"
+/opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "${OUTDIR}/${HOSTFILE}" "s3://osm-planet-eu-central-1/tile_logs/standard_layer/hosts/${YEAR}/${HOSTFILE}"
+/opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "${OUTDIR}/${APPFILE}" "s3://osm-planet-eu-central-1/tile_logs/standard_layer/apps/${YEAR}/${APPFILE}"
+/opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "${OUTDIR}/${COUNTRYFILE}" "s3://osm-planet-eu-central-1/tile_logs/standard_layer/countries/${YEAR}/${COUNTRYFILE}"
 
 rm -rf "$TMPDIR"

@@ -17,8 +17,7 @@
 # limitations under the License.
 #
 
-include_recipe "apt"
-include_recipe "munin"
+include_recipe "apt::postgresql"
 include_recipe "prometheus"
 
 package "locales-all"
@@ -33,12 +32,24 @@ node[:postgresql][:versions].each do |version|
   defaults = node[:postgresql][:settings][:defaults] || {}
   settings = node[:postgresql][:settings][version] || {}
 
+  standby_mode = settings[:standby_mode] || defaults[:standby_mode]
+  primary_conninfo = settings[:primary_conninfo] || defaults[:primary_conninfo]
+
+  passwords = if primary_conninfo
+                data_bag_item(primary_conninfo[:passwords][:bag],
+                              primary_conninfo[:passwords][:item])
+              end
+
   template "/etc/postgresql/#{version}/main/postgresql.conf" do
     source "postgresql.conf.erb"
     owner "postgres"
     group "postgres"
     mode "644"
-    variables :version => version, :defaults => defaults, :settings => settings
+    variables :version => version,
+              :defaults => defaults,
+              :settings => settings,
+              :primary_conninfo => primary_conninfo,
+              :passwords => passwords
     notifies :reload, "service[postgresql]"
     only_if { ::Dir.exist?("/etc/postgresql/#{version}/main") }
   end
@@ -74,33 +85,15 @@ node[:postgresql][:versions].each do |version|
     only_if { ::Dir.exist?("/var/lib/postgresql/#{version}/main") }
   end
 
-  standby_mode = settings[:standby_mode] || defaults[:standby_mode]
-  primary_conninfo = settings[:primary_conninfo] || defaults[:primary_conninfo]
-  restore_command = settings[:restore_command] || defaults[:restore_command]
-
-  if restore_command || standby_mode == "on"
-    passwords = if primary_conninfo
-                  data_bag_item(primary_conninfo[:passwords][:bag],
-                                primary_conninfo[:passwords][:item])
-                end
-
-    template "/var/lib/postgresql/#{version}/main/recovery.conf" do
-      source "recovery.conf.erb"
+  if standby_mode == "on"
+    file "/var/lib/postgresql/#{version}/main/standby.signal" do
       owner "postgres"
       group "postgres"
       mode "640"
-      variables :standby_mode => standby_mode,
-                :primary_conninfo => primary_conninfo,
-                :restore_command => restore_command,
-                :passwords => passwords
-      notifies :reload, "service[postgresql]"
-      only_if { ::Dir.exist?("/var/lib/postgresql/#{version}/main") }
     end
   else
-    template "/var/lib/postgresql/#{version}/main/recovery.conf" do
+    file "/var/lib/postgresql/#{version}/main/standby.signal" do
       action :delete
-      notifies :reload, "service[postgresql]"
-      only_if { ::Dir.exist?("/var/lib/postgresql/#{version}/main") }
     end
   end
 end
@@ -118,66 +111,65 @@ package "pgtop"
 package "libdbd-pg-perl"
 
 clusters = node[:postgresql][:clusters] || []
+passwords = data_bag_item("postgresql", "passwords")
 
 clusters.each do |name, details|
-  suffix = name.tr("/", ":")
+  prometheus_suffix = name.tr("/", "-")
+  prometheus_database = node[:postgresql][:monitor_database]
 
-  munin_plugin "postgres_bgwriter_#{suffix}" do
-    target "postgres_bgwriter"
-    conf "munin.erb"
-    conf_variables :port => details[:port]
+  postgresql_user "prometheus" do
+    cluster name
+    password passwords["prometheus"]
+    roles "pg_monitor"
+    not_if { ::File.exist?("/var/lib/postgresql/#{name}/standby.signal") }
   end
 
-  munin_plugin "postgres_checkpoints_#{suffix}" do
-    target "postgres_checkpoints"
-    conf "munin.erb"
-    conf_variables :port => details[:port]
+  prometheus_exporter "postgres" do
+    port 10000 + details[:port].to_i
+    service "postgres-#{prometheus_suffix}"
+    labels "cluster" => name
+    scrape_interval "1m"
+    scrape_timeout "1m"
+    options %w[
+      --collector.database_wraparound
+      --collector.long_running_transactions
+      --collector.process_idle
+      --collector.stat_activity_autovacuum
+      --collector.stat_wal_receiver
+      --collector.statio_user_indexes
+    ]
+    environment "DATA_SOURCE_NAME" => "postgres:///#{prometheus_database}?host=/run/postgresql&port=#{details[:port]}&user=prometheus&password=#{passwords['prometheus']}"
+    restrict_address_families "AF_UNIX"
+    subscribes :restart, "template[/etc/prometheus/exporters/postgres_queries.yml]"
   end
 
-  munin_plugin "postgres_connections_db_#{suffix}" do
-    target "postgres_connections_db"
-    conf "munin.erb"
-    conf_variables :port => details[:port]
+  if node[:postgresql][:monitor_queries]
+    template "/etc/prometheus/exporters/sql_exporter.yml" do
+      source "sql_exporter.yml.erb"
+      owner "root"
+      group "root"
+      mode "644"
+    end
+
+    prometheus_exporter "sql" do
+      port 20000 + details[:port].to_i
+      service "sql-#{prometheus_suffix}"
+      labels "cluster" => name
+      scrape_interval "1m"
+      scrape_timeout "1m"
+      options "--config.file=/etc/prometheus/exporters/sql_exporter.yml"
+      environment "SQLEXPORTER_TARGET_DSN" => "postgres://prometheus:#{passwords['prometheus']}@/run/postgresql:#{details[:port]}/#{prometheus_database}"
+      restrict_address_families "AF_UNIX"
+      subscribes :restart, "template[/etc/prometheus/exporters/sql_exporter.yml]"
+    end
+  else
+    prometheus_exporter "sql" do
+      action :delete
+      service "sql-#{prometheus_suffix}"
+    end
+
+    file "/etc/prometheus/exporters/sql_exporter.yml" do
+      action :delete
+    end
   end
-
-  munin_plugin "postgres_users_#{suffix}" do
-    target "postgres_users"
-    conf "munin.erb"
-    conf_variables :port => details[:port]
-  end
-
-  munin_plugin "postgres_xlog_#{suffix}" do
-    target "postgres_xlog"
-    conf "munin.erb"
-    conf_variables :port => details[:port]
-  end
-
-  next unless File.exist?("/var/lib/postgresql/#{details[:version]}/main/recovery.conf")
-
-  munin_plugin "postgres_replication_#{suffix}" do
-    target "postgres_replication"
-    conf "munin.erb"
-    conf_variables :port => details[:port]
-  end
-end
-
-uris = clusters.collect do |_, details|
-  "postgres@:#{details[:port]}/postgres?host=/run/postgresql"
-end
-
-template "/etc/prometheus/exporters/postgres_queries.yml" do
-  source "postgres_queries.yml.erb"
-  owner "root"
-  group "root"
-  mode "644"
-end
-
-prometheus_exporter "postgres" do
-  port 9187
-  user "postgres"
-  options "--extend.query-path=/etc/prometheus/exporters/postgres_queries.yml"
-  environment "DATA_SOURCE_URI" => uris.sort.uniq.first,
-              "PG_EXPORTER_AUTO_DISCOVER_DATABASES" => "true",
-              "PG_EXPORTER_EXCLUDE_DATABASES" => "postgres,template0,template1"
-  subscribes :restart, "template[/etc/prometheus/exporters/postgres_queries.yml]"
 end

@@ -2,7 +2,7 @@
 # Cookbook:: otrs
 # Recipe:: default
 #
-# Copyright:: 2012, OpenStreetMap Foundation
+# Copyright:: 2024, OpenStreetMap Foundation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,29 +25,14 @@ include_recipe "tools"
 
 passwords = data_bag_item("otrs", "passwords")
 
-package "libapache2-mod-perl2"
-package "libapache2-reload-perl"
+apache_module "perl" do
+  package "libapache2-mod-perl2"
+end
 
-package %w[
-  libcrypt-eksblowfish-perl
-  libdatetime-perl
-  libgd-gd2-perl
-  libgd-graph-perl
-  libgd-text-perl
-  libjson-xs-perl
-  libmail-imapclient-perl
-  libmoo-perl
-  libnet-ldap-perl
-  libpdf-api2-perl
-  libsoap-lite-perl
-  libtemplate-perl
-  libyaml-libyaml-perl
-]
-
+apache_module "deflate"
 apache_module "headers"
+apache_module "rewrite"
 
-version = node[:otrs][:version]
-user = node[:otrs][:user]
 database_cluster = node[:otrs][:database_cluster]
 database_name = node[:otrs][:database_name]
 database_user = node[:otrs][:database_user]
@@ -65,65 +50,58 @@ postgresql_database database_name do
   owner database_user
 end
 
-remote_file "#{Chef::Config[:file_cache_path]}/otrs-#{version}.tar.bz2" do
-  source "https://download.znuny.org/releases/otrs-#{version}.tar.bz2"
-  not_if { ::File.exist?("/opt/otrs-#{version}") }
-end
+package "dbconfig-common"
 
-execute "untar-otrs-#{version}" do
-  command "tar jxf #{Chef::Config[:file_cache_path]}/otrs-#{version}.tar.bz2"
-  cwd "/opt"
-  user "root"
+template "/etc/dbconfig-common/otrs2.conf" do
+  source "dbconfig.config.erb"
+  owner "root"
   group "root"
-  not_if { ::File.exist?("/opt/otrs-#{version}") }
+  mode "600"
+  variables :database_name => database_name,
+            :database_user => database_user,
+            :database_password => database_password,
+            :database_cluster => database_cluster
 end
 
-config = edit_file "/opt/otrs-#{version}/Kernel/Config.pm.dist" do |line|
-  line.gsub!(/^( *)\$Self->{Database} = 'otrs'/, "\\1$Self->{Database} = '#{database_name}'")
-  line.gsub!(/^( *)\$Self->{DatabaseUser} = 'otrs'/, "\\1$Self->{DatabaseUser} = '#{database_user}'")
-  line.gsub!(/^( *)\$Self->{DatabasePw} = 'some-pass'/, "\\1$Self->{DatabasePw} = '#{database_password}'")
-  line.gsub!(/^( *)\$Self->{Database} = 'otrs'/, "\\1$Self->{Database} = '#{database_name}'")
-  line.gsub!(/^( *\$Self->{DatabaseDSN} = "DBI:mysql:)/, "#\\1")
-  line.gsub!(/^#( *\$Self->{DatabaseDSN} = "DBI:Pg:.*;host=)/, "\\1")
-  line.gsub!(/^( *)# (\$Self->{CheckMXRecord} = 0)/, "\\1\\2")
-  line.gsub!(/^( *)# \$Self->{SessionUseCookie} = 0/, "\\1$Self->{SessionCheckRemoteIP} = 0")
+apt_package "otrs2"
 
-  line
+# Ensure debconf is repopulated on a dbconfig change
+execute "dpkg-reconfigure-otrs2" do
+  action :nothing
+  command "dpkg-reconfigure -fnoninteractive otrs2"
+  subscribes :run, "template[/etc/dbconfig-common/otrs2.conf]"
 end
 
-file "/opt/otrs-#{version}/Kernel/Config.pm" do
-  owner user
-  group "www-data"
-  mode "664"
-  content config
+# Disable deb otrs2 apache config
+apache_conf "otrs2" do
+  action :disable
 end
 
-link "/opt/otrs" do
-  to "/opt/otrs-#{version}"
-end
-
-execute "/opt/otrs/bin/otrs.SetPermissions.pl" do
-  action :run
-  command "/opt/otrs/bin/otrs.SetPermissions.pl --otrs-user=#{user} --web-group=www-data /opt/otrs-#{version}"
-  user "root"
-  group "root"
-  only_if { File.stat("/opt/otrs/README.md").uid != Etc.getpwnam("otrs").uid }
+# Disable deb otrs2 cron job
+file "/etc/cron.d/otrs2" do
+  action :delete
+  manage_symlink_source true
 end
 
 systemd_service "otrs" do
   description "OTRS Daemon"
   type "forking"
   user "otrs"
-  group "otrs"
-  exec_start "/opt/otrs/bin/otrs.Daemon.pl start"
+  group "www-data"
+  exec_start_pre "-/usr/share/otrs/bin/otrs.Daemon.pl stop" # Stop if race with deb cron
+  exec_start "/usr/share/otrs/bin/otrs.Daemon.pl start"
   private_tmp true
-  protect_system "full"
-  protect_home true
-  read_write_paths "/var/log/exim4"
+  protect_system "strict"
+  protect_home false
+  runtime_directory "otrs"
+  runtime_directory_mode 0o770
+  runtime_directory_preserve true
+  read_write_paths ["/var/lib/otrs", "/run/otrs", "/var/log/exim4", "/var/spool/exim4"]
 end
 
 service "otrs" do
   action [:enable, :start]
+  subscribes :restart, "apt_package[otrs2]"
   subscribes :restart, "systemd_service[otrs]"
 end
 
@@ -135,13 +113,6 @@ end
 apache_site site do
   template "apache.erb"
   variables :aliases => site_aliases
-end
-
-template "/etc/sudoers.d/otrs" do
-  source "sudoers.erb"
-  owner "root"
-  group "root"
-  mode "440"
 end
 
 template "/etc/cron.daily/otrs-backup" do

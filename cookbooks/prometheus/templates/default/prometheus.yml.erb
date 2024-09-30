@@ -27,10 +27,6 @@ scrape_configs:
     static_configs:
       - targets:
           - localhost:9093
-  - job_name: promscale
-    static_configs:
-      - targets:
-          - localhost:9201
   - job_name: ssl
     scrape_interval: 15m
     metrics_path: /probe
@@ -57,6 +53,12 @@ scrape_configs:
         replacement: 127.0.0.1:9219
 <% @jobs.sort.each do |name, targets| -%>
   - job_name: <%= name %>
+<% if targets.first[:scrape_interval] -%>
+    scrape_interval: <%= targets.first[:scrape_interval] %>
+<% end -%>
+<% if targets.first[:scrape_timeout] -%>
+    scrape_timeout: <%= targets.first[:scrape_timeout] %>
+<% end -%>
 <% if targets.first[:sni] -%>
     tls_config:
       server_name: <%= targets.first[:sni] %>
@@ -70,6 +72,9 @@ scrape_configs:
           - "<%= target[:address] %>"
         labels:
           instance: <%= target[:instance] %>
+<% target[:labels].sort.each do |name, value| -%>
+          <%= name %>: <%= value %>
+<% end -%>
 <% end -%>
     metric_relabel_configs:
 <% targets.each do |target| -%>
@@ -80,15 +85,36 @@ scrape_configs:
 <% end -%>
 <% end -%>
 <% end -%>
+  - job_name: junos
+    scrape_interval: 5m
+    scrape_timeout: 4m
+    static_configs:
+<% @junos_targets.sort_by { |t| t[:instance] }.each do |target| -%>
+      - targets:
+          - "<%= target[:target] %>/<%= target[:address] %>"
+        labels:
+          instance: <%= target[:instance] %>
+<% target[:labels].sort.each do |name, value| -%>
+          <%= name %>: <%= value %>
+<% end -%>
+<% end -%>
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: "([^/]+)/.*"
+        target_label: __param_target
+      - source_labels: [__address__]
+        regex: "[^/]+/(.*)"
+        target_label: __address__
   - job_name: snmp
     scrape_interval: 5m
     scrape_timeout: 2m
     metrics_path: /snmp
     static_configs:
-      - targets:
 <% @snmp_targets.sort_by { |t| t[:instance] }.each do |target| -%>
       - targets:
-          - "<%= target[:target] %>/<%= target[:module] %>/<%= target[:address] %>"
+<% target[:modules].each do |module_name| -%>
+          - "<%= target[:target] %>/<%= module_name %>/<%= target[:address] %>"
+<% end -%>
         labels:
           instance: <%= target[:instance] %>
 <% target[:labels].sort.each do |name, value| -%>
@@ -103,20 +129,8 @@ scrape_configs:
         regex: "[^/]+/([^/]+)/.*"
         target_label: __param_module
       - source_labels: [__address__]
+        regex: "[^/]+/([^/]+)/.*"
+        target_label: module
+      - source_labels: [__address__]
         regex: "[^/]+/[^/]+/(.*)"
         target_label: __address__
-
-remote_write:
-  - url: "http://localhost:9201/write"
-    write_relabel_configs:
-      - source_labels: [__name__]
-        regex: "go_.*"
-        action: drop
-      - source_labels: [__name__]
-        regex: "promhttp_.*"
-        action: drop
-    queue_config:
-      capacity: 10000
-      min_shards: 4
-      batch_send_deadline: 30s
-      max_backoff: 1s

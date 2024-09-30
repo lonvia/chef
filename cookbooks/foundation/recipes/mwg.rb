@@ -24,7 +24,6 @@ passwords = data_bag_item("foundation", "passwords")
 mediawiki_site "mwg.osmfoundation.org" do
   sitename "OSMF Membership Working Group Wiki"
   metanamespace "OSMFMWG"
-  directory "/srv/mwg.osmfoundation.org"
   fpm_prometheus_port 11003
   database_name "mwg_wiki"
   database_user "mwg_wikiuser"
@@ -32,12 +31,10 @@ mediawiki_site "mwg.osmfoundation.org" do
   admin_password passwords["mwg"]["admin"]
   logo "/Wiki.png"
   email_contact "webmaster@openstreetmap.org"
-  email_sender "webmaster@openstreetmap.org"
+  email_sender "wiki@noreply.openstreetmap.org"
   email_sender_name "OSMF Board Wiki"
   private_site true
-  recaptcha_public_key "6LflIQATAAAAAMXyDWpba-FgipVzE-aGF4HIR59N"
-  recaptcha_private_key passwords["mwg"]["recaptcha"]
-  version "1.37"
+  version "1.39"
 end
 
 cookbook_file "/srv/mwg.osmfoundation.org/Wiki.png" do

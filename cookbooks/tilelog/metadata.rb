@@ -6,5 +6,7 @@ description      "Installs and configures tile log analysis"
 
 version          "1.0.0"
 supports         "ubuntu"
+depends          "accounts"
+depends          "planet"
 depends          "python"
 depends          "systemd"

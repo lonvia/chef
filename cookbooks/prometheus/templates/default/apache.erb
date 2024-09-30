@@ -5,7 +5,7 @@
 	ServerAlias prometheus.osm.org
 	ServerAdmin webmaster@openstreetmap.org
 
-	CustomLog /var/log/apache2/prometheus.openstreetmap.org-access.log combined
+	CustomLog /var/log/apache2/prometheus.openstreetmap.org-access.log combined_extended
 	ErrorLog /var/log/apache2/prometheus.openstreetmap.org-error.log
 
 	RedirectPermanent /.well-known/acme-challenge/ http://acme.openstreetmap.org/.well-known/acme-challenge/
@@ -16,7 +16,7 @@
 	ServerName prometheus.openstreetmap.org
 	ServerAdmin webmaster@openstreetmap.org
 
-	CustomLog /var/log/apache2/prometheus.openstreetmap.org-access.log combined
+	CustomLog /var/log/apache2/prometheus.openstreetmap.org-access.log combined_extended
 	ErrorLog /var/log/apache2/prometheus.openstreetmap.org-error.log
 
 	SSLEngine on
@@ -24,11 +24,15 @@
 	SSLCertificateKeyFile /etc/ssl/private/prometheus.openstreetmap.org.key
 
 	ProxyPass /prometheus http://localhost:9090/prometheus
-	Redirect 403 /alertmanager/api
 	ProxyPass /alertmanager http://localhost:9093/alertmanager
 	ProxyPass /karma http://localhost:8081/karma
+	ProxyPass /api/live/ws ws://localhost:3000/api/live/ws
 	ProxyPass / http://localhost:3000/
 	ProxyPreserveHost on
+
+	<Location /prometheus/api/v1/admin>
+		Require all denied
+	</Location>
 
 	<Location /alertmanager>
 <% @admin_hosts.each do |host| -%>
@@ -41,4 +45,31 @@
 		Require ip <%= host %>
 <% end -%>
 	</Location>
+</VirtualHost>
+
+<VirtualHost *:80>
+  ServerName munin.openstreetmap.org
+  ServerAlias munin.osm.org
+  ServerAdmin webmaster@openstreetmap.org
+
+  CustomLog /var/log/apache2/munin.openstreetmap.org-access.log combined_extended
+  ErrorLog /var/log/apache2/munin.openstreetmap.org-error.log
+
+  RedirectPermanent /.well-known/acme-challenge/ http://acme.openstreetmap.org/.well-known/acme-challenge/
+  Redirect permanent / https://prometheus.openstreetmap.org/
+</VirtualHost>
+
+<VirtualHost *:443>
+  ServerName munin.openstreetmap.org
+  ServerAlias munin.osm.org
+  ServerAdmin webmaster@openstreetmap.org
+
+  CustomLog /var/log/apache2/munin.openstreetmap.org-access.log combined_extended
+  ErrorLog /var/log/apache2/munin.openstreetmap.org-error.log
+
+  SSLEngine on
+  SSLCertificateFile /etc/ssl/certs/prometheus.openstreetmap.org.pem
+  SSLCertificateKeyFile /etc/ssl/private/prometheus.openstreetmap.org.key
+
+  Redirect permanent / https://prometheus.openstreetmap.org/
 </VirtualHost>

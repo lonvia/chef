@@ -99,15 +99,40 @@ end
 
 prometheus_exporter "node" do
   port 9100
+  user "root"
+  proc_subset "all"
+  protect_clock false
+  restrict_address_families %w[AF_UNIX AF_NETLINK]
+  system_call_filter ["@system-service", "@clock"]
   options %w[
     --collector.textfile.directory=/var/lib/prometheus/node-exporter
     --collector.interrupts
-    --collector.ntp
     --collector.processes
+    --collector.rapl.enable-zone-label
     --collector.systemd
     --collector.tcpstat
   ]
   metric_relabel metric_relabel
+end
+
+unless node[:prometheus][:junos].empty?
+  targets = node[:prometheus][:junos].collect { |_, details| details[:address] }.sort.join(",")
+
+  prometheus_exporter "junos" do
+    port 9326
+    options %W[
+      --ssh.user=prometheus
+      --ssh.keyfile=/var/lib/prometheus/junos-exporter/id_rsa
+      --ssh.targets=#{targets}
+      --bgp.enabled=false
+      --lacp.enabled=true
+      --ldp.enabled=false
+      --ospf.enabled=false
+      --power.enabled=false
+    ]
+    ssh true
+    register_target false
+  end
 end
 
 unless node[:prometheus][:snmp].empty?

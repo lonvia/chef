@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-include_recipe "munin"
+include_recipe "prometheus"
 
 package %w[
   chrony
@@ -61,7 +61,9 @@ service "chrony" do
   action [:enable, :start]
 end
 
-munin_plugin "chrony"
+prometheus_exporter "chrony" do
+  port 9123
+end
 
 # chrony occasionally marks all servers offline during a network outage.
 # force online all sources during a chef run

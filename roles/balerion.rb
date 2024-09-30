@@ -4,13 +4,14 @@ description "Master role applied to balerion"
 default_attributes(
   :networking => {
     :interfaces => {
-      :external_ipv4 => {
+      :external => {
         :interface => "bond0",
         :role => :external,
-        :family => :inet,
-        :address => "138.44.68.134",
-        :prefix => "30",
-        :gateway => "138.44.68.133",
+        :inet => {
+          :address => "138.44.68.134",
+          :prefix => "30",
+          :gateway => "138.44.68.133"
+        },
         :bond => {
           :slaves => %w[ens14f0np0 ens14f1np1]
         }
@@ -20,8 +21,6 @@ default_attributes(
   :postgresql => {
     :settings => {
       :defaults => {
-        :shared_buffers => "8GB",
-        :maintenance_work_mem => "7144MB",
         :effective_cache_size => "16GB"
       }
     }
@@ -37,8 +36,12 @@ default_attributes(
   },
   :tile => {
     :database => {
-      :cluster => "12/main",
+      :cluster => "16/main",
       :postgis => "3"
+    },
+    :mapnik => "3.1",
+    :replication => {
+      :directory => "/store/replication"
     },
     :styles => {
       :default => {

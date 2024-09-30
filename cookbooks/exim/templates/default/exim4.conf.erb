@@ -107,6 +107,7 @@ hostlist   relay_from_hosts = <; <%= @relay_from_hosts.join(" ; ") %>
 # manual for details. The lists above are used in the access control lists for
 # checking incoming messages. The names of these ACLs are defined here:
 
+acl_smtp_mail = acl_check_mail
 acl_smtp_rcpt = acl_check_rcpt
 acl_smtp_data = acl_check_data
 
@@ -377,6 +378,13 @@ smtp_accept_max = <%= node[:exim][:smtp_accept_max] %>
 
 begin acl
 
+# This access control list is used for the MAIL command in an incoming
+# SMTP message.
+
+acl_check_mail:
+
+  accept
+
 # This access control list is used for every RCPT command in an incoming
 # SMTP message. The tests are run in order until the address is either
 # accepted or denied.
@@ -446,6 +454,10 @@ acl_check_rcpt:
           message       = Rejected because $sender_address is blacklisted\nQueries to postmaster@$qualify_domain
           !hosts        = +relay_from_hosts
 
+  deny    sender_domains= partial-lsearch;/etc/exim4/blocked-sender-domains
+          message       = Rejected because $sender_address is blacklisted\nQueries to postmaster@$qualify_domain
+          !hosts        = +relay_from_hosts
+
   # Accept mail to postmaster in any local domain, regardless of the source,
   # and without verifying the sender.
 
@@ -502,7 +514,11 @@ acl_check_rcpt:
   # relay domains is to use a callout (add /callout), but please read the
   # documentation about callouts before doing this.
 
-  require verify = recipient
+  deny    domains = +relay_to_domains
+         !verify  = recipient/callout=use_sender
+
+  deny    domains = !+relay_to_domains
+         !verify  = recipient
 
 <% if node[:exim][:dns_blacklists] -%>
   # Deny any messages from hosts in certain blacklists.
@@ -661,6 +677,9 @@ noreply:
   transport = remote_smtp
 <% else -%>
   transport = <%= name %>
+<% end -%>
+<% if details[:case_sensitive] -%>
+  caseful_local_part
 <% end -%>
 
 <% end -%>

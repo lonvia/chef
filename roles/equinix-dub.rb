@@ -30,11 +30,16 @@ default_attributes(
         },
         :inet6 => {
           :prefix => "64",
-          :gateway => "2001:470:1:b3b::1",
-          :routes => {
-            "2001:978:2:2c::/64" => { :type => "unreachable" }
-          }
+          :gateway => "2001:470:1:b3b::1"
         }
+      }
+    }
+  },
+  :prometheus => {
+    :metrics => {
+      :host_location => {
+        :help => "Host location",
+        :labels => { :site => "dublin" }
       }
     }
   },
@@ -46,7 +51,7 @@ default_attributes(
 
 override_attributes(
   :networking => {
-    :nameservers => ["10.0.64.2", "1.1.1.1", "1.0.0.1"],
+    :nameservers => ["10.0.64.2", "74.82.42.42", "2001:470:20::2"],
     :search => ["dub.openstreetmap.org", "openstreetmap.org"]
   },
   :ntp => {

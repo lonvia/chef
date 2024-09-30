@@ -21,11 +21,10 @@ include_recipe "mediawiki"
 
 passwords = data_bag_item("foundation", "passwords")
 
-mediawiki_site "wiki.osmfoundation.org" do
-  aliases ["www.osmfoundation.org", "osmfoundation.org",
+mediawiki_site "osmfoundation.org" do
+  aliases ["wiki.osmfoundation.org", "www.osmfoundation.org",
            "foundation.openstreetmap.org", "foundation.osm.org"]
   sitename "OpenStreetMap Foundation"
-  directory "/srv/wiki.osmfoundation.org"
   fpm_max_children 20
   fpm_start_servers 5
   fpm_min_spare_servers 5
@@ -38,30 +37,29 @@ mediawiki_site "wiki.osmfoundation.org" do
   skin "OSMFoundation"
   logo "/w/skins/OSMFoundation/img/logo.png"
   email_contact "webmaster@openstreetmap.org"
-  email_sender "webmaster@openstreetmap.org"
+  email_sender "wiki@noreply.openstreetmap.org"
   email_sender_name "OSMF Wiki"
   private_accounts true
-  recaptcha_public_key "6LflIQATAAAAAMXyDWpba-FgipVzE-aGF4HIR59N"
-  recaptcha_private_key passwords["wiki"]["recaptcha"]
-  extra_file_extensions ["mp3"]
-  version "1.37"
-end
-
-mediawiki_skin "osmf" do
-  site "wiki.osmfoundation.org"
-  repository "https://github.com/openstreetmap/mediawiki-skins-osmf.git"
-  revision "master"
+  extra_file_extensions %w[mp3 pptx]
+  version "1.39"
 end
 
 mediawiki_skin "OSMFoundation" do
-  site "wiki.osmfoundation.org"
+  site "osmfoundation.org"
   repository "https://github.com/osmfoundation/osmf-mediawiki-skin.git"
   revision "master"
   legacy false
 end
 
-cookbook_file "/srv/wiki.osmfoundation.org/Wiki.png" do
+cookbook_file "/srv/osmfoundation.org/Wiki.png" do
   owner node[:mediawiki][:user]
   group node[:mediawiki][:group]
   mode "644"
+end
+
+template "/srv/osmfoundation.org/robots.txt" do
+  owner node[:mediawiki][:user]
+  group node[:mediawiki][:group]
+  mode "644"
+  source "robots.txt.erb"
 end

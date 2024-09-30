@@ -8,34 +8,21 @@ default_attributes(
     }
   },
   :location => "Zagreb, Croatia",
-  :munin => {
-    :plugins => {
-      :sensors_temp => {
-        :temp1 => { :warning => "85.0" },
-        :temp2 => { :warning => "85.0" },
-        :temp3 => { :warning => "85.0" },
-        :temp4 => { :warning => "85.0" },
-        :temp5 => { :warning => "85.0" },
-        :temp6 => { :warning => "85.0" },
-        :temp8 => { :warning => "85.0" },
-        :temp9 => { :warning => "85.0" },
-        :temp10 => { :warning => "85.0" },
-        :temp11 => { :warning => "85.0" },
-        :temp12 => { :warning => "85.0" },
-        :temp13 => { :warning => "85.0" }
-      }
-    }
-  },
   :networking => {
     :interfaces => {
-      :external_ipv4 => {
+      :external => {
         :interface => "eno1",
         :role => :external,
-        :family => :inet,
-        :address => "10.5.0.77",
-        :prefix => "16",
-        :gateway => "10.5.0.1",
-        :public_address => "161.53.248.77"
+        :inet => {
+          :address => "193.198.233.218",
+          :prefix => "29",
+          :gateway => "193.198.233.217"
+        },
+        :inet6 => {
+          :address => "2001:b68:40ff:3::2",
+          :prefix => "64",
+          :gateway => "2001:b68:40ff:3::1"
+        }
       }
     }
   }

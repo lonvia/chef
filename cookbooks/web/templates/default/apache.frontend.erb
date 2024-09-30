@@ -1,5 +1,16 @@
 # DO NOT EDIT - This file is being maintained by Chef
 
+#
+# Setup logging
+# 
+SetEnvIfNoCase Authorization "^Basic " AUTH_METHOD=basic
+SetEnvIfNoCase Authorization "^OAuth " AUTH_METHOD=oauth1
+SetEnvIfNoCase Authorization "^Bearer " AUTH_METHOD=oauth2
+SetEnvIfExpr "%{QUERY_STRING} =~ /(^|&)oauth_signature=/" AUTH_METHOD=oauth1
+LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %Dus %{UNIQUE_ID}e %{SSL_PROTOCOL}x %{SSL_CIPHER}x %{AUTH_METHOD}e" combined_with_time
+CustomLog /var/log/apache2/access.log combined_with_time
+ErrorLog /var/log/apache2/error.log
+
 <VirtualHost *:443>
   #
   # Basic server configuration
@@ -15,18 +26,23 @@
   SSLCertificateFile /etc/ssl/certs/www.openstreetmap.org.pem
   SSLCertificateKeyFile /etc/ssl/private/www.openstreetmap.org.key
 
-  #
-  # Setup logging
-  #
-  LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %Dus %{UNIQUE_ID}e %{SSL_PROTOCOL}x %{SSL_CIPHER}x" combined_with_time
-  CustomLog /var/log/apache2/access.log combined_with_time
-  ErrorLog /var/log/apache2/error.log
+  # Get the real remote IP for requests via a trusted proxy
+  RemoteIPHeader CF-Connecting-IP
+<% @cloudflare.sort.each do |address| -%>
+  RemoteIPTrustedProxy <%= address %>
+<% end -%>
 
   #
   # Turn on various features
   #
   ExpiresActive On
   RewriteEngine on
+
+  #
+  # Configure timeouts
+  #
+  RequestReadTimeout handshake=20-40,MinRate=500 header=20-40,MinRate=500 body=20-120,MinRate=500
+  LogLevel reqtimeout:info
 
   #
   # Add the unique ID to the request headers
@@ -54,6 +70,18 @@
   # Block changeset scraper
   #
   RewriteCond %{HTTP_USER_AGENT} "OSMApp Tuner"
+  RewriteRule . - [F,L]
+
+  #
+  # Block trace scraper
+  #
+  RewriteCond %{HTTP_USER_AGENT} "python-httpx/0.24.1"
+  RewriteRule . - [F,L]
+
+  #
+  # Block out of control spider
+  #
+  RewriteCond %{HTTP_USER_AGENT} "Bytespider"
   RewriteRule . - [F,L]
 
   #
@@ -95,7 +123,7 @@
     FileETag Size
 
     ExpiresDefault "access plus 1 year"
-    Header set Cache-Control "immutable, max-age=31536000"
+    Header set Cache-Control "immutable, max-age=31536000" "expr=%{REQUEST_STATUS} == 200"
   </Location>
 
   #
@@ -151,15 +179,15 @@
   #
   # Pass supported calls to cgimap
   #
-  RewriteRule ^/api/0\.6/map(\.json|\.xml)?$ fcgi://127.0.0.1:8000$0 [P]
+  RewriteRule ^/api/0\.6/map(\.json|\.xml)?$ unix:/run/cgimap/socket|fcgi://127.0.0.1$0 [P]
   RewriteCond %{REQUEST_METHOD} ^(HEAD|GET)$
-  RewriteRule ^/api/0\.6/(node|way|relation|changeset)/[0-9]+(\.json|\.xml)?$ fcgi://127.0.0.1:8000$0 [P]
-  RewriteRule ^/api/0\.6/(node|way|relation)/[0-9]+/history(\.json|\.xml)?$ fcgi://127.0.0.1:8000$0 [P]
-  RewriteRule ^/api/0\.6/(node|way|relation)/[0-9]+/relations(\.json|\.xml)?$ fcgi://127.0.0.1:8000$0 [P]
-  RewriteRule ^/api/0\.6/node/[0-9]+/ways(\.json|\.xml)?$ fcgi://127.0.0.1:8000$0 [P]
-  RewriteRule ^/api/0\.6/(way|relation)/[0-9]+/full(\.json|\.xml)?$ fcgi://127.0.0.1:8000$0 [P]
-  RewriteRule ^/api/0\.6/(nodes|ways|relations)(\.json|\.xml)?$ fcgi://127.0.0.1:8000$0 [P]
-  RewriteRule ^/api/0\.6/changeset/[0-9]+/(upload|download)(\.json|\.xml)?$ fcgi://127.0.0.1:8000$0 [P]
+  RewriteRule ^/api/0\.6/(node|way|relation|changeset)/[0-9]+(\.json|\.xml)?$ unix:/run/cgimap/socket|fcgi://127.0.0.1$0 [P]
+  RewriteRule ^/api/0\.6/(node|way|relation)/[0-9]+/history(\.json|\.xml)?$ unix:/run/cgimap/socket|fcgi://127.0.0.1$0 [P]
+  RewriteRule ^/api/0\.6/(node|way|relation)/[0-9]+/relations(\.json|\.xml)?$ unix:/run/cgimap/socket|fcgi://127.0.0.1$0 [P]
+  RewriteRule ^/api/0\.6/node/[0-9]+/ways(\.json|\.xml)?$ unix:/run/cgimap/socket|fcgi://127.0.0.1$0 [P]
+  RewriteRule ^/api/0\.6/(way|relation)/[0-9]+/full(\.json|\.xml)?$ unix:/run/cgimap/socket|fcgi://127.0.0.1$0 [P]
+  RewriteRule ^/api/0\.6/(nodes|ways|relations)(\.json|\.xml)?$ unix:/run/cgimap/socket|fcgi://127.0.0.1$0 [P]
+  RewriteRule ^/api/0\.6/changeset/[0-9]+/(upload|download)(\.json|\.xml)?$ unix:/run/cgimap/socket|fcgi://127.0.0.1$0 [P]
 
   #
   # Redirect trac and wiki requests to the right places
@@ -271,16 +299,25 @@
 <Directory <%= node[:web][:base_directory] %>/rails/public>
   Require all granted
 
+  RewriteCond "%{HTTP:Accept-encoding}" "br"
+  RewriteCond "%{REQUEST_FILENAME}\.br" -s
+  RewriteRule "^(.*)\.(css|ico|js|json|svg|xml)$" "$1\.$2\.br" [QSA]
+
   RewriteCond "%{HTTP:Accept-encoding}" "gzip"
   RewriteCond "%{REQUEST_FILENAME}\.gz" -s
   RewriteRule "^(.*)\.(css|ico|js|json|svg|xml)$" "$1\.$2\.gz" [QSA]
 
-  RewriteRule "\.css\.gz$" "-" [T=text/css,E=no-gzip:1]
-  RewriteRule "\.ico\.gz$"  "-" [T=image/vnd.microsoft.icon,E=no-gzip:1]
-  RewriteRule "\.js\.gz$"  "-" [T=text/javascript,E=no-gzip:1]
-  RewriteRule "\.json\.gz$"  "-" [T=application/json,E=no-gzip:1]
-  RewriteRule "\.svg\.gz$"  "-" [T=image/svg+xml,E=no-gzip:1]
-  RewriteRule "\.xml\.gz$"  "-" [T=application/xml,E=no-gzip:1]
+  RewriteRule "\.css\.(br|gz)$" "-" [T=text/css,E=no-gzip:1,E=no-brotli:1]
+  RewriteRule "\.ico\.(br|gz)$"  "-" [T=image/vnd.microsoft.icon,E=no-gzip:1,E=no-brotli:1]
+  RewriteRule "\.js\.(br|gz)$"  "-" [T=text/javascript,E=no-gzip:1,E=no-brotli:1]
+  RewriteRule "\.json\.(br|gz)$"  "-" [T=application/json,E=no-gzip:1,E=no-brotli:1]
+  RewriteRule "\.svg\.(br|gz)$"  "-" [T=image/svg+xml,E=no-gzip:1,E=no-brotli:1]
+  RewriteRule "\.xml\.(br|gz)$"  "-" [T=application/xml,E=no-gzip:1,E=no-brotli:1]
+
+  <FilesMatch "\.(css|ico|js|json|svg|xml)\.br$">
+    Header append Content-Encoding br
+    Header append Vary Accept-Encoding
+  </FilesMatch>
 
   <FilesMatch "\.(css|ico|js|json|svg|xml)\.gz$">
     Header append Content-Encoding gzip

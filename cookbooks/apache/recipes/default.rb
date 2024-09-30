@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 
-include_recipe "munin"
+include_recipe "fail2ban"
 include_recipe "prometheus"
 include_recipe "ssl"
 
@@ -54,11 +54,11 @@ template "/etc/apache2/ports.conf" do
   mode "644"
 end
 
-service "apache2" do
-  action [:enable, :start]
-  retries 2
-  retry_delay 10
-  supports :status => true, :restart => true, :reload => true
+systemd_service "apache2" do
+  dropin "chef"
+  memory_high "50%"
+  memory_max "75%"
+  notifies :restart, "service[apache2]"
 end
 
 apache_module "info" do
@@ -71,18 +71,22 @@ apache_module "status" do
   variables :hosts => admins["hosts"]
 end
 
-apache_module "deflate" do
-  conf "deflate.conf.erb"
-end
-
-if node[:apache][:reqtimeout]
-  apache_module "reqtimeout" do
-    action [:enable]
+if node[:apache][:evasive][:enable]
+  apache_module "evasive" do
+    conf "evasive.conf.erb"
   end
 else
-  apache_module "reqtimeout" do
-    action [:disable]
+  apache_module "evasive" do
+    action :disable
   end
+end
+
+apache_module "brotli" do
+  conf "brotli.conf.erb"
+end
+
+apache_module "deflate" do
+  conf "deflate.conf.erb"
 end
 
 apache_module "headers"
@@ -92,12 +96,43 @@ apache_conf "ssl" do
   template "ssl.erb"
 end
 
-munin_plugin "apache_accesses"
-munin_plugin "apache_processes"
-munin_plugin "apache_volume"
+# Apache should only be started after modules enabled
+service "apache2" do
+  action [:enable, :start]
+  retries 2
+  retry_delay 10
+  supports :status => true, :restart => true, :reload => true
+end
+
+fail2ban_filter "apache-forbidden" do
+  action :delete
+end
+
+fail2ban_jail "apache-forbidden" do
+  action :delete
+end
+
+fail2ban_filter "apache-evasive" do
+  failregex ": Blacklisting address <ADDR>: possible DoS attack\.$"
+end
+
+fail2ban_jail "apache-evasive" do
+  filter "apache-evasive"
+  backend "systemd"
+  journalmatch "_SYSTEMD_UNIT=apache2.service SYSLOG_IDENTIFIER=mod_evasive"
+  ports [80, 443]
+  findtime "10m"
+  maxretry 3
+end
+
+template "/var/lib/prometheus/node-exporter/apache.prom" do
+  source "apache.prom.erb"
+  owner "root"
+  group "root"
+  mode "644"
+end
 
 prometheus_exporter "apache" do
   port 9117
-  listen_switch "telemetry.address"
   options "--scrape_uri=http://localhost/server-status?auto"
 end

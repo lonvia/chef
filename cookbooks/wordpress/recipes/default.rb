@@ -26,7 +26,12 @@ include_recipe "php::fpm"
 
 package %w[
   subversion
+  php-mbstring
   php-mysql
+  php-igbinary
+  php-imagick
+  php-intl
+  php-xml
 ]
 
 apache_module "proxy"
@@ -42,4 +47,17 @@ fail2ban_jail "wordpress" do
   logpath "/var/log/auth.log"
   ports [80, 443]
   maxretry 6
+end
+
+directory "/opt/wp-cli" do
+  owner "root"
+  group "root"
+  mode "755"
+end
+
+remote_file "/opt/wp-cli/wp" do
+  source "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
+  owner "root"
+  group "root"
+  mode "755"
 end

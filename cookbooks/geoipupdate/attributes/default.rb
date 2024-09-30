@@ -1,9 +1,7 @@
 default[:geoipupdate][:account] = "149244"
 default[:geoipupdate][:editions] = %w[GeoLite2-ASN GeoLite2-City GeoLite2-Country]
-default[:geoipupdate][:directory] = if node[:lsb][:release].to_f < 22.04
-                                      "/usr/share/GeoIP"
-                                    else
+default[:geoipupdate][:directory] = if platform?("debian")
                                       "/var/lib/GeoIP"
+                                    else
+                                      "/usr/share/GeoIP"
                                     end
-
-default[:apt][:sources] |= ["maxmind"]

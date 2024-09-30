@@ -26,13 +26,6 @@ if [ -f /tmp/planetdump.lock ]; then
     fi
 fi
 
-# Redirect this shell's output to a file. This is so that it
-# can be emailed later, since this script is run from incron
-# and incron doesn't yet support MAILTO like cron does. The
-# command below appears to work in bash as well as dash.
-logfile="/tmp/planetdump.log.$$"
-exec > "${logfile}" 2>&1
-
 # Create lock file
 echo $$ > /tmp/planetdump.lock
 
@@ -40,16 +33,6 @@ echo $$ > /tmp/planetdump.lock
 function cleanup {
     # Remove the lock file
     rm /tmp/planetdump.lock
-
-    # Send an email with the output, since incron doesn't yet
-    # support doing this in the incrontab
-    if [[ -s "$logfile" ]]
-    then
-        mailx -s "Planet dump output: ${file}" admins@openstreetmap.org zerebubuth@gmail.com < "${logfile}"
-    fi
-
-    # Remove the log file
-    rm -f "${logfile}"
 }
 
 # Remove lock on exit
@@ -76,17 +59,19 @@ time nice -n 19 /opt/planet-dump-ng/planet-dump-ng \
 
 # Function to create bittorrent files
 function mk_torrent {
-  type="$1"
-  format="$2"
-  dir="$3"
-  s_year="$4"
-  web_dir="${dir}${s_year}"
-  name="${type}-${date}.osm.${format}"
-  web_path="${web_dir}/${name}"
-  rss_web_dir="https://planet.openstreetmap.org/${dir}"
-  rss_file="${type}-${format}-rss.xml"
-  torrent_file="${name}.torrent"
-  torrent_url="${rss_web_dir}${s_year}/${torrent_file}"
+  local type="$1"
+  local format="$2"
+  local dir="$3"
+  local s3path="$4"
+  local s_year="$5"
+  local web_dir="${dir}${s_year}"
+  local name="${type}-${date}.osm.${format}"
+  local web_path="${web_dir}/${name}"
+  local s3_web_path="${s3path}/${name}"
+  local rss_web_dir="https://planet.openstreetmap.org/${dir}"
+  local rss_file="${type}-${format}-rss.xml"
+  local torrent_file="${name}.torrent"
+  local torrent_url="${rss_web_dir}${s_year}/${torrent_file}"
 
   # create .torrent file
   mktorrent -l 22 "${name}" \
@@ -96,13 +81,13 @@ function mk_torrent {
      -a udp://tracker-udp.gbitt.info:80/announce,http://tracker.gbitt.info/announce,https://tracker.gbitt.info/announce \
      -a http://retracker.local/announce \
      -w "https://planet.openstreetmap.org/${web_path}" \
+     -w "https://osm-planet-eu-central-1.s3.dualstack.eu-central-1.amazonaws.com/${s3_web_path}" \
+     -w "https://osm-planet-us-west-2.s3.dualstack.us-west-2.amazonaws.com/${s3_web_path}" \
      -w "https://ftp5.gwdg.de/pub/misc/openstreetmap/planet.openstreetmap.org/${web_path}" \
      -w "https://ftpmirror.your.org/pub/openstreetmap/${web_path}" \
      -w "https://mirror.init7.net/openstreetmap/${web_path}" \
-     -w "https://free.nchc.org.tw/osm.planet/${web_path}" \
      -w "https://ftp.fau.de/osm-planet/${web_path}" \
      -w "https://ftp.spline.de/pub/openstreetmap/${web_path}" \
-     -w "https://osm.openarchive.site/${name}" \
      -w "https://downloads.opencagedata.com/planet/${name}" \
      -w "https://planet.osm-hr.org/${web_path}" \
      -w "https://planet.maps.mail.ru/${web_path}" \
@@ -156,17 +141,43 @@ function mk_torrent {
 	"${rss_file}"
 }
 
+function replication_status_wait {
+  local s3_url="$1"
+  for i in {1..3600}; do
+    local replication_status=$(curl -sI --location "${s3_url}" | grep -F 'x-amz-replication-status' | awk '{print $2}' |  tr -d '\r' )
+
+    if [[ "${replication_status}" == "COMPLETED" ]]; then
+      return 0 # success
+    fi
+
+    sleep 1
+  done
+  echo "Timeout waiting for ${s3_url} to complete replication status: ${replication_status}"
+}
+
 # Function to install a dump in place
 function install_dump {
-  type="$1"
-  format="$2"
-  dir="$3"
-  year="$4"
-  name="${type}-${date}.osm.${format}"
-  latest="${type}-latest.osm.${format}"
-  rss_file="${type}-${format}-rss.xml"
+  local type="$1"
+  local format="$2"
+  local dir="$3"
+  local s3dir="$4"
+  local year="$5"
+  local name="${type}-${date}.osm.${format}"
+  local latest="${type}-latest.osm.${format}"
+  local rss_file="${type}-${format}-rss.xml"
 
   md5sum "${name}" > "${name}.md5"
+
+  # Upload all files to S3
+  /opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "${name}.md5" "s3://osm-planet-eu-central-1/${s3dir}/${name}.md5"
+  /opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "${name}.torrent" "s3://osm-planet-eu-central-1/${s3dir}/${name}.torrent"
+  /opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "${name}" "s3://osm-planet-eu-central-1/${s3dir}/${name}"
+
+  # Waiting for S3 replication to complete
+  replication_status_wait "https://osm-planet-eu-central-1.s3.dualstack.eu-central-1.amazonaws.com/${s3dir}/${name}.md5"
+  replication_status_wait "https://osm-planet-eu-central-1.s3.dualstack.eu-central-1.amazonaws.com/${s3dir}/${name}.torrent"
+  replication_status_wait "https://osm-planet-eu-central-1.s3.dualstack.eu-central-1.amazonaws.com/${s3dir}/${name}"
+
   mkdir -p "${dir}/${year}"
   mv "${name}" "${name}.md5" "${dir}/${year}"
   ln -sf "${year:-.}/${name}" "${dir}/${latest}"
@@ -177,17 +188,17 @@ function install_dump {
 }
 
 # Create *.torrent files
-mk_torrent "changesets" "bz2" "planet" "/${year}"
-mk_torrent "discussions" "bz2" "planet" "/${year}"
-mk_torrent "planet" "bz2" "planet" "/${year}"
-mk_torrent "history" "bz2" "planet/full-history" "/${year}"
-mk_torrent "planet" "pbf" "pbf"
-mk_torrent "history" "pbf" "pbf/full-history"
+mk_torrent "changesets" "bz2" "planet" "changesets/osm/${year}" "/${year}"
+mk_torrent "discussions" "bz2" "planet" "discussions/osm/${year}" "/${year}"
+mk_torrent "planet" "bz2" "planet" "planet/osm/${year}" "/${year}"
+mk_torrent "history" "bz2" "planet/full-history" "planet-full-history/osm/${year}" "/${year}"
+mk_torrent "planet" "pbf" "pbf" "planet/pbf/${year}"
+mk_torrent "history" "pbf" "pbf/full-history" "planet-full-history/pbf/${year}"
 
 # Move dumps into place
-install_dump "changesets" "bz2" "<%= node[:planet][:dump][:xml_directory] %>" "${year}"
-install_dump "discussions" "bz2" "<%= node[:planet][:dump][:xml_directory] %>" "${year}"
-install_dump "planet" "bz2" "<%= node[:planet][:dump][:xml_directory] %>" "${year}"
-install_dump "history" "bz2" "<%= node[:planet][:dump][:xml_history_directory] %>" "${year}"
-install_dump "planet" "pbf" "<%= node[:planet][:dump][:pbf_directory] %>"
-install_dump "history" "pbf" "<%= node[:planet][:dump][:pbf_history_directory] %>"
+install_dump "changesets" "bz2" "<%= node[:planet][:dump][:xml_directory] %>" "changesets/osm/${year}" "${year}"
+install_dump "discussions" "bz2" "<%= node[:planet][:dump][:xml_directory] %>" "discussions/osm/${year}" "${year}"
+install_dump "planet" "bz2" "<%= node[:planet][:dump][:xml_directory] %>" "planet/osm/${year}" "${year}"
+install_dump "history" "bz2" "<%= node[:planet][:dump][:xml_history_directory] %>" "planet-full-history/osm/${year}" "${year}"
+install_dump "planet" "pbf" "<%= node[:planet][:dump][:pbf_directory] %>" "planet/pbf/${year}"
+install_dump "history" "pbf" "<%= node[:planet][:dump][:pbf_history_directory] %>" "planet-full-history/pbf/${year}"

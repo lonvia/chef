@@ -19,7 +19,6 @@
 
 include_recipe "apache"
 include_recipe "chef::knife"
-include_recipe "munin"
 
 # cache_dir = Chef::Config[:file_cache_path]
 #
@@ -36,7 +35,7 @@ include_recipe "munin"
 # end
 #
 # remote_file "#{cache_dir}/#{chef_package}" do
-#   source "https://packages.chef.io/files/stable/chef-server/#{chef_version}/ubuntu/16.04/#{chef_package}"
+#   source "https://packages.chef.io/files/stable/chef-server/#{chef_version}/ubuntu/22.04/chef-server-core_#{chef_version}-1_amd64.deb"
 #   owner "root"
 #   group "root"
 #   mode 0644
@@ -101,5 +100,3 @@ template "/etc/cron.daily/chef-server-backup" do
   group "root"
   mode "755"
 end
-
-munin_plugin "chef_status"

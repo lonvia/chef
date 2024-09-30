@@ -1,5 +1,5 @@
 default[:overpass][:fqdn] = "overpass.openstreetmap.org"
-default[:overpass][:version] = "0.7.57"
+default[:overpass][:version] = "0.7.61.8"
 # One of: no, meta, attic
 default[:overpass][:meta_mode] = "attic"
 # One of: no, gz, lz4
@@ -12,3 +12,5 @@ default[:overpass][:replication_url] = "https://planet.openstreetmap.org/replica
 default[:overpass][:restricted_api] = true
 
 default[:overpass][:logdir] = "/var/log/overpass"
+
+default[:accounts][:users][:overpass][:status] = :role

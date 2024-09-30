@@ -19,7 +19,6 @@
 
 include_recipe "apt"
 include_recipe "git"
-include_recipe "munin"
 include_recipe "prometheus"
 include_recipe "sysfs"
 include_recipe "tools"
@@ -28,11 +27,17 @@ ohai_plugin "hardware" do
   template "ohai.rb.erb"
 end
 
-case node[:cpu][:"0"][:vendor_id]
-when "GenuineIntel"
-  package "intel-microcode"
-when "AuthenticAMD"
-  package "amd64-microcode"
+if platform?("debian")
+  package "firmware-linux"
+end
+
+if node[:cpu] && node[:cpu][:"0"] && node[:cpu][:"0"][:vendor_id]
+  case node[:cpu][:"0"][:vendor_id]
+  when "GenuineIntel"
+    package "intel-microcode"
+  when "AuthenticAMD"
+    package "amd64-microcode"
+  end
 end
 
 if node[:dmi] && node[:dmi][:system]
@@ -56,19 +61,35 @@ if node[:roles].include?("bytemark") || node[:roles].include?("exonetric") || no
 end
 
 case manufacturer
-when "HP"
+when "HP", "HPE"
+  include_recipe "apt::management-component-pack"
+
   package "hponcfg"
+
+  execute "update-ilo" do
+    action :nothing
+    command "/usr/sbin/hponcfg -f /etc/ilo-defaults.xml"
+    not_if { kitchen? }
+  end
+
+  template "/etc/ilo-defaults.xml" do
+    source "ilo-defaults.xml.erb"
+    owner "root"
+    group "root"
+    mode "644"
+    notifies :run, "execute[update-ilo]"
+  end
 
   package "hp-health" do
     action :install
     notifies :restart, "service[hp-health]"
-    only_if { node[:lsb][:release].to_f < 22.04 }
+    only_if { platform?("ubuntu") && node[:lsb][:release].to_f < 22.04 }
   end
 
   service "hp-health" do
     action [:enable, :start]
     supports :status => true, :restart => true
-    only_if { node[:lsb][:release].to_f < 22.04 }
+    only_if { platform?("ubuntu") && node[:lsb][:release].to_f < 22.04 }
   end
 
   if product.end_with?("Gen8", "Gen9")
@@ -81,9 +102,23 @@ when "HP"
       action [:enable, :start]
       supports :status => true, :restart => true
     end
+  elsif product.end_with?("Gen10")
+    package "amsd" do
+      action :install
+      notifies :restart, "service[amsd]"
+    end
+
+    service "amsd" do
+      action [:enable, :start]
+      supports :status => true, :restart => true
+    end
   end
 
-  units << "1"
+  units << if product.end_with?("Gen10")
+             "0"
+           else
+             "1"
+           end
 when "TYAN"
   units << "0"
 when "TYAN Computer Corporation"
@@ -117,6 +152,7 @@ end
 units.sort.uniq.each do |unit|
   service "serial-getty@ttyS#{unit}" do
     action [:enable, :start]
+    not_if { kitchen? }
   end
 end
 
@@ -156,6 +192,8 @@ if File.exist?("/etc/default/grub")
   end
 end
 
+package "initramfs-tools"
+
 execute "update-initramfs" do
   action :nothing
   command "update-initramfs -u -k all"
@@ -171,9 +209,24 @@ template "/etc/initramfs-tools/conf.d/mdadm" do
   notifies :run, "execute[update-initramfs]"
 end
 
-package "haveged"
-service "haveged" do
-  action [:enable, :start]
+# haveged is only required on older kernels
+# /dev/random is not blocking anymore in 5.15+
+if Chef::Util.compare_versions(node[:kernel][:release], [5, 15]).negative?
+  package "haveged"
+  service "haveged" do
+    action [:enable, :start]
+  end
+else
+  service "haveged" do
+    action [:stop, :disable]
+  end
+  package "haveged" do
+    action :remove
+  end
+end
+
+watchdog_module = %w[hpwdt sp5100_tco].find do |module_name|
+  node[:hardware][:pci]&.any? { |_, pci| pci[:modules]&.any?(module_name) }
 end
 
 if node[:kernel][:modules].include?("ipmi_si")
@@ -189,9 +242,15 @@ if node[:kernel][:modules].include?("ipmi_si")
 
   prometheus_exporter "ipmi" do
     port 9290
+    user "root"
+    private_devices false
+    protect_clock false
+    system_call_filter ["@system-service", "@raw-io"]
     options "--config.file=/etc/prometheus/ipmi_local.yml"
     subscribes :restart, "template[/etc/prometheus/ipmi_local.yml]"
   end
+
+  watchdog_module ||= "ipmi_watchdog"
 end
 
 package "irqbalance"
@@ -210,6 +269,20 @@ end
 
 ohai_plugin "lldp" do
   template "lldp.rb.erb"
+end
+
+package %w[
+  rasdaemon
+  ruby-sqlite3
+]
+
+service "rasdaemon" do
+  action [:enable, :start]
+end
+
+prometheus_exporter "rasdaemon" do
+  port 9797
+  user "root"
 end
 
 tools_packages = []
@@ -234,9 +307,6 @@ if node[:virtualization][:role] != "guest" ||
     when "mpt2sas", "mpt3sas"
       tools_packages << "sas2ircu"
       status_packages["sas2ircu-status"] ||= []
-    when "megaraid_mm"
-      tools_packages << "megactl"
-      status_packages["megaraid-status"] ||= []
     when "megaraid_sas"
       tools_packages << "megacli"
       status_packages["megaclisas-status"] ||= []
@@ -260,6 +330,8 @@ if node[:virtualization][:role] != "guest" ||
     end
   end
 end
+
+include_recipe "apt::hwraid" unless status_packages.empty?
 
 %w[ssacli lsiutil sas2ircu megactl megacli arcconf].each do |tools_package|
   if tools_packages.include?(tools_package)
@@ -289,60 +361,30 @@ else
   end
 end
 
-if status_packages.include?("cciss-vol-status")
-  template "/usr/local/bin/cciss-vol-statusd" do
-    source "cciss-vol-statusd.erb"
-    owner "root"
-    group "root"
-    mode "755"
-    notifies :restart, "service[cciss-vol-statusd]"
-  end
-
-  systemd_service "cciss-vol-statusd" do
-    description "Check cciss_vol_status values in the background"
-    exec_start "/usr/local/bin/cciss-vol-statusd"
-    private_tmp true
-    protect_system "full"
-    protect_home true
-    no_new_privileges true
-    notifies :restart, "service[cciss-vol-statusd]"
-  end
-else
-  systemd_service "cciss-vol-statusd" do
-    action :delete
-  end
-
-  template "/usr/local/bin/cciss-vol-statusd" do
-    action :delete
-  end
-end
-
-%w[cciss-vol-status mpt-status sas2ircu-status megaraid-status megaclisas-status aacraid-status].each do |status_package|
+%w[cciss-vol-status mpt-status sas2ircu-status megaclisas-status aacraid-status].each do |status_package|
   if status_packages.include?(status_package)
     package status_package
 
-    template "/etc/default/#{status_package}d" do
-      source "raid.default.erb"
-      owner "root"
-      group "root"
-      mode "644"
-      variables :devices => status_packages[status_package]
-    end
-
     service "#{status_package}d" do
-      action [:start, :enable]
-      supports :status => false, :restart => true, :reload => false
-      subscribes :restart, "template[/etc/default/#{status_package}d]"
-    end
-  else
-    package status_package do
-      action :purge
+      action [:stop, :disable]
     end
 
     file "/etc/default/#{status_package}d" do
       action :delete
     end
+  else
+    package status_package do
+      action :purge
+    end
   end
+end
+
+systemd_service "cciss-vol-statusd" do
+  action :delete
+end
+
+template "/usr/local/bin/cciss-vol-statusd" do
+  action :delete
 end
 
 disks = if node[:hardware][:disk]
@@ -368,27 +410,27 @@ intel_nvmes = nvmes.select { |pci| pci[:vendor_name] == "Intel Corporation" }
 if !intel_ssds.empty? || !intel_nvmes.empty?
   package "unzip"
 
-  intel_mas_tool_version = "1.10"
-  intel_mas_package_version = "#{intel_mas_tool_version}.155-0"
+  sst_tool_version = "1.3"
+  sst_package_version = "#{sst_tool_version}.208-0"
 
-  remote_file "#{Chef::Config[:file_cache_path]}/Intel_MAS_CLI_Tool_#{intel_mas_tool_version}_Linux.zip" do
-    source "https://downloadmirror.intel.com/646992/Intel_MAS_CLI_Tool_Linux_#{intel_mas_tool_version}-v2.zip"
-  end
+  # remote_file "#{Chef::Config[:file_cache_path]}/SST_CLI_Linux_#{sst_tool_version}.zip" do
+  #   source "https://downloadmirror.intel.com/743764/SST_CLI_Linux_#{sst_tool_version}.zip"
+  # end
 
-  execute "#{Chef::Config[:file_cache_path]}/Intel_MAS_CLI_Tool_#{intel_mas_tool_version}_Linux.zip" do
-    command "unzip Intel_MAS_CLI_Tool_#{intel_mas_tool_version}_Linux.zip intelmas_#{intel_mas_package_version}_amd64.deb"
+  execute "#{Chef::Config[:file_cache_path]}/SST_CLI_Linux_#{sst_tool_version}.zip" do
+    command "unzip SST_CLI_Linux_#{sst_tool_version}.zip sst_#{sst_package_version}_amd64.deb"
     cwd Chef::Config[:file_cache_path]
     user "root"
     group "root"
-    not_if { ::File.exist?("#{Chef::Config[:file_cache_path]}/intelmas_#{intel_mas_package_version}_amd64.deb") }
+    not_if { ::File.exist?("#{Chef::Config[:file_cache_path]}/sst_#{sst_package_version}_amd64.deb") }
+  end
+
+  dpkg_package "sst" do
+    version "#{sst_package_version}"
+    source "#{Chef::Config[:file_cache_path]}/sst_#{sst_package_version}_amd64.deb"
   end
 
   dpkg_package "intelmas" do
-    version "#{intel_mas_package_version}"
-    source "#{Chef::Config[:file_cache_path]}/intelmas_#{intel_mas_package_version}_amd64.deb"
-  end
-
-  dpkg_package "isdct" do
     action :purge
   end
 end
@@ -402,38 +444,21 @@ disks = disks.map do |disk|
     if controller && controller[:device]
       device = controller[:device].sub("/dev/", "")
       smart = disk[:smart_device]
-
-      if device.start_with?("cciss/") && smart =~ /^cciss,(\d+)$/
-        array = node[:hardware][:disk][:arrays][disk[:arrays].first]
-        munin = "cciss-3#{array[:wwn]}-#{Regexp.last_match(1)}"
-      elsif smart =~ /^.*,(\d+)$/
-        munin = "#{device}-#{Regexp.last_match(1)}"
-      elsif smart =~ %r{^.*,(\d+)/(\d+)$}
-        munin = "#{device}-#{Regexp.last_match(1)}:#{Regexp.last_match(2)}"
-      end
     elsif disk[:device]
       device = disk[:device].sub("/dev/", "")
       smart = disk[:smart_device]
-
-      if smart =~ /^.*,(\d+),(\d+),(\d+)$/
-        munin = "#{device}-#{Regexp.last_match(1)}:#{Regexp.last_match(2)}:#{Regexp.last_match(3)}"
-      end
     end
   elsif disk[:device] =~ %r{^/dev/(nvme\d+)n\d+$}
     device = Regexp.last_match(1)
-    munin = device
   elsif disk[:device]
     device = disk[:device].sub("/dev/", "")
-    munin = device
   end
 
   next if device.nil?
 
   Hash[
     :device => device,
-    :smart => smart,
-    :munin => munin,
-    :hddtemp => munin.tr("-:", "_")
+    :smart => smart
   ]
 end
 
@@ -487,46 +512,15 @@ if disks.count.positive?
 
   prometheus_collector "smart" do
     interval "15m"
-  end
-
-  # Don't try and do munin monitoring of disks behind
-  # an Areca controller as they only allow one thing to
-  # talk to the controller at a time and smartd will
-  # throw errors if it clashes with munin
-  disks = disks.reject { |disk| disk[:smart]&.start_with?("areca,") }
-
-  disks.each do |disk|
-    munin_plugin "smart_#{disk[:munin]}" do
-      target "smart_"
-      conf "munin.smart.erb"
-      conf_variables :disk => disk
-    end
+    user "root"
+    capability_bounding_set %w[CAP_DAC_OVERRIDE CAP_SYS_ADMIN CAP_SYS_RAWIO]
+    private_devices false
+    private_users false
+    protect_clock false
   end
 else
   service "smartd" do
     action [:stop, :disable]
-  end
-end
-
-if disks.count.positive?
-  munin_plugin "hddtemp_smartctl" do
-    conf "munin.hddtemp.erb"
-    conf_variables :disks => disks
-  end
-else
-  munin_plugin "hddtemp_smartctl" do
-    action :delete
-    conf "munin.hddtemp.erb"
-  end
-end
-
-plugins = Dir.glob("/etc/munin/plugins/smart_*").map { |p| File.basename(p) } -
-          disks.map { |d| "smart_#{d[:munin]}" }
-
-plugins.each do |plugin|
-  munin_plugin plugin do
-    action :delete
-    conf "munin.smart.erb"
   end
 end
 
@@ -544,7 +538,7 @@ if File.exist?("/etc/mdadm/mdadm.conf")
     content mdadm_conf
   end
 
-  service "mdadm" do
+  service "mdmonitor" do
     action :nothing
     subscribes :restart, "file[/etc/mdadm/mdadm.conf]"
   end
@@ -567,19 +561,30 @@ node[:hardware][:blacklisted_modules].each do |module_name|
   end
 end
 
-if node[:hardware][:watchdog]
-  package "watchdog"
+if watchdog_module
+  kernel_module watchdog_module do
+    action :install
+  end
 
-  template "/etc/default/watchdog" do
-    source "watchdog.erb"
+  execute "systemctl-reload" do
+    action :nothing
+    command "systemctl daemon-reload"
+    user "root"
+    group "root"
+  end
+
+  directory "/etc/systemd/system.conf.d" do
+    owner "root"
+    group "root"
+    mode "755"
+  end
+
+  template "/etc/systemd/system.conf.d/watchdog.conf" do
+    source "watchdog.conf.erb"
     owner "root"
     group "root"
     mode "644"
-    variables :module => node[:hardware][:watchdog]
-  end
-
-  service "watchdog" do
-    action [:enable, :start]
+    notifies :run, "execute[systemctl-reload]"
   end
 end
 
@@ -641,4 +646,15 @@ if node[:hardware][:shm_size]
     options "rw,nosuid,nodev,size=#{node[:hardware][:shm_size]}"
     notifies :run, "execute[remount-dev-shm]"
   end
+end
+
+prometheus_collector "ohai" do
+  interval "15m"
+  user "root"
+  proc_subset "all"
+  capability_bounding_set %w[CAP_DAC_OVERRIDE CAP_SYS_ADMIN CAP_SYS_RAWIO]
+  private_devices false
+  private_users false
+  protect_clock false
+  protect_kernel_modules false
 end

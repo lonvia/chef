@@ -4,11 +4,12 @@ description "Master role applied to eddie"
 default_attributes(
   :networking => {
     :interfaces => {
-      :internal_ipv4 => {
+      :internal => {
         :interface => "enp1s0f0.2801",
         :role => :internal,
-        :family => :inet,
-        :address => "10.0.0.10"
+        :inet => {
+          :address => "10.0.0.10"
+        }
       }
     }
   },
@@ -18,9 +19,7 @@ default_attributes(
         :shared_buffers => "64GB",
         :work_mem => "64MB",
         :maintenance_work_mem => "1GB",
-        :effective_cache_size => "180GB",
-        :effective_io_concurrency => "256",
-        :random_page_cost => "1.1"
+        :effective_cache_size => "180GB"
       }
     }
   },

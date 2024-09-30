@@ -19,25 +19,28 @@
 
 package %w[
   bash-completion
+  cron
   dmidecode
   ethtool
+  iotop
+  iptraf-ng
+  locales-all
   lsof
   lsscsi
+  lvm2
+  mtr-tiny
+  numactl
   pciutils
+  rsyslog
   screen
   smartmontools
   strace
   sysstat
+  systemd-coredump
   tcpdump
   usbutils
-  numactl
+  vim
   xfsprogs
-  iotop
-  lvm2
-  rsyslog
-  cron
-  locales-all
-  systemd-coredump
 ]
 
 service "rsyslog" do
@@ -46,7 +49,7 @@ service "rsyslog" do
 end
 
 # Remove some unused and unwanted packages
-package %w[mlocate nano whoopsie] do
+package %w[mlocate whoopsie] do
   action :purge
 end
 

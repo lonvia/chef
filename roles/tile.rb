@@ -4,47 +4,41 @@ description "Role applied to all tile servers"
 default_attributes(
   :accounts => {
     :users => {
+      :pnorman => { :status => :administrator },
       :tile => {
-        :members => [:jburgess, :tomh]
+        :members => [:jburgess, :tomh, :pnorman]
       }
     }
   },
   :apache => {
     :mpm => "event",
     :timeout => 60,
+    :evasive => {
+      :enable => false
+    },
     :event => {
-      :server_limit => 60,
-      :max_request_workers => 1200,
       :threads_per_child => 20,
       :min_spare_threads => 300,
-      :max_spare_threads => 1200,
       :max_connections_per_child => 0,
       :async_request_worker_factor => 4,
-      :listen_cores_buckets_ratio => 6
-    }
-  },
-  :munin => {
-    :plugins => {
-      :renderd_processed => {
-        :graph_order => "reqPrio req reqLow dirty reqBulk dropped",
-        :reqPrio => { :draw => "AREA" },
-        :req => { :draw => "STACK" }
-      }
+      :listen_cores_buckets_ratio => 8
     }
   },
   :postgresql => {
     :settings => {
       :defaults => {
         :max_connections => "250",
-        :temp_buffers => "32MB",
+        :shared_buffers => "16GB",
         :work_mem => "128MB",
+        :maintenance_work_mem => "8GB",
         :max_parallel_workers_per_gather => "0",
+        :wal_level => "minimal",
         :wal_buffers => "1024kB",
         :wal_writer_delay => "500ms",
+        :checkpoint_timeout => "60min",
         :commit_delay => "10000",
-        :checkpoint_segments => "60",
-        :max_wal_size => "2880MB",
-        :random_page_cost => "1.1",
+        :max_wal_size => "10GB",
+        :max_wal_senders => "0",
         :jit => "off",
         :track_activity_query_size => "16384",
         :autovacuum_vacuum_scale_factor => "0.05",
@@ -62,6 +56,18 @@ default_attributes(
         "net.core.somaxconn" => 10000
       }
     },
+    :network_conntrack_time_wait => {
+      :comment => "Only track completed connections for 30 seconds",
+      :parameters => {
+        "net.netfilter.nf_conntrack_tcp_timeout_time_wait" => "30"
+      }
+    },
+    :network_conntrack_max => {
+      :comment => "Increase max number of connections tracked",
+      :parameters => {
+        "net.netfilter.nf_conntrack_max" => "524288"
+      }
+    },
     :no_tcp_slow_start => {
       :comment => "Disable TCP slow start",
       :parameters => {
@@ -74,7 +80,7 @@ default_attributes(
         "net.core.default_qdisc" => "fq",
         "net.ipv4.tcp_congestion_control" => "bbr"
       }
-    },
+    }
   },
   :tile => {
     :database => {
@@ -92,7 +98,8 @@ default_attributes(
     :styles => {
       :default => {
         :repository => "https://github.com/gravitystorm/openstreetmap-carto.git",
-        :revision => "v5.4.0",
+        :revision => "v5.8.0",
+        :fonts_script => "/srv/tile.openstreetmap.org/styles/default/scripts/get-fonts.sh",
         :max_zoom => 19
       }
     }

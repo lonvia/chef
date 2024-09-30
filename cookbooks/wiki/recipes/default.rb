@@ -30,13 +30,13 @@ end
 mediawiki_site "wiki.openstreetmap.org" do
   aliases ["wiki.osm.org", "wiki.openstreetmap.com", "wiki.openstreetmap.net",
            "wiki.openstreetmap.ca", "wiki.openstreetmap.eu",
-           "wiki.openstreetmap.pro", "wiki.openstreetmaps.org"]
-  directory "/srv/wiki.openstreetmap.org"
+           "wiki.openstreetmap.pro", "wiki.openstreetmaps.org",
+           "osm.wiki", "www.osm.wiki", "wiki.osm.wiki"]
 
-  fpm_max_children 50
-  fpm_start_servers 10
-  fpm_min_spare_servers 10
-  fpm_max_spare_servers 20
+  fpm_max_children 200
+  fpm_start_servers 25
+  fpm_min_spare_servers 25
+  fpm_max_spare_servers 50
   fpm_prometheus_port 9253
 
   database_name "wiki"
@@ -53,8 +53,8 @@ mediawiki_site "wiki.openstreetmap.org" do
 
   metanamespace "Wiki"
 
-  recaptcha_public_key "6LdFIQATAAAAAMwtHeI8KDgPqvRbXeNYSq1gujKz"
-  recaptcha_private_key passwords["recaptcha"]
+  hcaptcha_public_key "b67a410b-955e-4049-b432-f9c00e0202c0"
+  hcaptcha_private_key passwords["hcaptcha"]
 
   # site_notice "MAINTENANCE: WIKI READ-ONLY UNTIL Monday 16 May 2016 - 11:00am UTC/GMT."
   # site_readonly "MAINTENANCE: WIKI READ-ONLY UNTIL Monday 16 May 2016 - 11:00am UTC/GMT."
@@ -107,6 +107,19 @@ mediawiki_extension "MultiMaps" do
   template "mw-ext-MultiMaps.inc.php.erb"
   template_cookbook "wiki"
   variables :thunderforest_key => passwords["thunderforest"]
+  action :delete
+end
+
+mediawiki_extension "JsonConfig" do
+  site "wiki.openstreetmap.org"
+  template "mw-ext-JsonConfig.inc.php.erb"
+  template_cookbook "wiki"
+end
+
+mediawiki_extension "Kartographer" do
+  site "wiki.openstreetmap.org"
+  template "mw-ext-Kartographer.inc.php.erb"
+  template_cookbook "wiki"
 end
 
 cookbook_file "/srv/wiki.openstreetmap.org/osm_logo_wiki.png" do
@@ -134,9 +147,48 @@ directory "/srv/wiki.openstreetmap.org/dump" do
   mode "0775"
 end
 
-cron_d "wiki-dump" do
-  minute "0"
-  hour "2"
+systemd_service "wiki-dump" do
+  description "Wiki dump"
+  type "oneshot"
+  exec_start "/usr/bin/php w/maintenance/dumpBackup.php --full --quiet --output=gzip:dump/dump.xml.gz"
+  working_directory "/srv/wiki.openstreetmap.org"
   user "wiki"
-  command "cd /srv/wiki.openstreetmap.org && php w/maintenance/dumpBackup.php --full --quiet --output=gzip:dump/dump.xml.gz"
+  sandbox :enable_network => true
+  memory_deny_write_execute false
+  restrict_address_families "AF_UNIX"
+  read_write_paths "/srv/wiki.openstreetmap.org/dump"
+end
+
+systemd_timer "wiki-dump" do
+  description "Wiki dump"
+  on_calendar "02:00"
+end
+
+service "wiki-dump.timer" do
+  action [:enable, :start]
+end
+
+systemd_service "wiki-rdf-dump" do
+  description "Wiki RDF dump"
+  type "oneshot"
+  exec_start [
+    "/usr/bin/php w/extensions/Wikibase/repo/maintenance/dumpRdf.php --wiki wiki --format ttl --flavor full-dump --entity-type item --entity-type property --no-cache --output /tmp/wikibase-rdf.ttl",
+    "/bin/gzip -9 /tmp/wikibase-rdf.ttl",
+    "/bin/mv /tmp/wikibase-rdf.ttl.gz /srv/wiki.openstreetmap.org/dump/wikibase-rdf.ttl.gz"
+  ]
+  working_directory "/srv/wiki.openstreetmap.org"
+  user "wiki"
+  sandbox :enable_network => true
+  memory_deny_write_execute false
+  restrict_address_families "AF_UNIX"
+  read_write_paths "/srv/wiki.openstreetmap.org/dump"
+end
+
+systemd_timer "wiki-rdf-dump" do
+  description "Wiki RDF dump"
+  on_calendar "04:00"
+end
+
+service "wiki-rdf-dump.timer" do
+  action [:enable, :start]
 end

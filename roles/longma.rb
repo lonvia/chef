@@ -4,11 +4,12 @@ description "Master role applied to longma"
 default_attributes(
   :networking => {
     :interfaces => {
-      :internal_ipv4 => {
+      :internal => {
         :interface => "bond0",
         :role => :internal,
-        :family => :inet,
-        :address => "10.0.64.13",
+        :inet => {
+          :address => "10.0.64.13"
+        },
         :bond => {
           :mode => "802.3ad",
           :lacprate => "fast",
@@ -16,42 +17,45 @@ default_attributes(
           :slaves => %w[enp68s0f0 enp68s0f1 enp68s0f2 enp68s0f3]
         }
       },
-      :external_ipv4 => {
+      :external => {
         :interface => "bond0.101",
         :role => :external,
-        :family => :inet,
-        :address => "184.104.226.109"
-      },
-      :external_ipv6 => {
-        :interface => "bond0.101",
-        :role => :external,
-        :family => :inet6,
-        :address => "2001:470:1:b3b::d"
+        :inet => {
+          :address => "184.104.226.109"
+        },
+        :inet6 => {
+          :address => "2001:470:1:b3b::d"
+        }
       }
     }
   },
   :postgresql => {
-    :versions => ["14"],
+    :versions => ["16"],
     :settings => {
       :defaults => {
         :max_connections => "550",
         :work_mem => "240MB",
-        :fsync => "on",
         :effective_io_concurrency => "500"
       }
     }
   },
   :nominatim => {
     :state => "standalone",
-    :dbcluster => "14/main",
+    :dbcluster => "16/main",
     :postgis => "3",
     :enable_qa_tiles => true,
     :flatnode_file => "/ssd/nominatim/nodes.store",
     :logdir => "/ssd/nominatim/log",
+    :api_flavour => "python",
+    :api_workers => 24,
+    :api_pool_size => 10,
     :fpm_pools => {
       "nominatim.openstreetmap.org" => {
         :max_children => 200
       }
+    },
+    :config => {
+      :forward_dependencies => "yes"
     }
   }
 )

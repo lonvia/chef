@@ -62,9 +62,24 @@ action :create do
       end
     end
   end
+
+  execute "wp-cli plugin activate #{new_resource.plugin}" do
+    command "/opt/wp-cli/wp --path='#{site_directory}' plugin activate '#{new_resource.plugin}'"
+    user "www-data"
+    group "www-data"
+    not_if "/opt/wp-cli/wp --path='#{site_directory}' plugin is-active '#{new_resource.plugin}'"
+    ignore_failure plugin_repository.start_with?("https://plugins.svn.wordpress.org/")
+  end
 end
 
 action :delete do
+  execute "wp-cli plugin deactivate #{new_resource.plugin}" do
+    command "/opt/wp-cli/wp --path='#{site_directory}' plugin deactivate '#{new_resource.plugin}'"
+    user "www-data"
+    group "www-data"
+    only_if "/opt/wp-cli/wp --path='#{site_directory}' plugin is-active '#{new_resource.plugin}'"
+  end
+
   directory plugin_directory do
     action :delete
     recursive true

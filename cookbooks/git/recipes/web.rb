@@ -21,6 +21,7 @@ include_recipe "apache"
 
 package "gitweb"
 
+apache_module "cgid"
 apache_module "rewrite"
 
 git_site = node[:git][:host]
@@ -40,6 +41,13 @@ end
 
 template "/srv/#{git_site}/robots.txt" do
   source "robots.txt.erb"
+  owner "root"
+  group "root"
+  mode "644"
+end
+
+template "/srv/#{git_site}/indextext.html" do
+  source "indextext.html.erb"
   owner "root"
   group "root"
   mode "644"

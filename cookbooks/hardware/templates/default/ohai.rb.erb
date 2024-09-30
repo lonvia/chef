@@ -155,7 +155,7 @@ Ohai.plugin(:Hardware) do
     find_adaptec_disks(disk) if File.exist?("/usr/sbin/arcconf")
     find_areca_disks(disk) if File.exist?("/opt/areca/x86_64/cli64")
 
-    find_md_arrays(disk)
+    find_md_arrays(disk) if File.exist?("/prod/mdstat")
 
     disk[:disks].each do |disk|
       if disk[:vendor] =~ /^(BTWA|CVPR|PHDV)/ && disk[:model] == "INTEL"
@@ -256,24 +256,44 @@ Ohai.plugin(:Hardware) do
     array = nil
 
     File.new("/proc/mdstat", "r").each do |line|
-      if line =~ /^(md\d+) : active raid(\d+)((?: (?:sd[a-z]|nvme\d+n\d+)\d*\[\d+\](?:\([A-Z]\))*)+)$/
+      if line =~ /^(md\d+) : active raid(\d+)((?: (?:sd[a-z]\d*|nvme\d+n\d+(?:p\d+)?)\[\d+\](?:\([A-Z]\))*)+)$/
         array = {
           :id => devices[:arrays].count,
           :device => "/dev/#{Regexp.last_match(1)}",
+          :status => "optimal",
           :raid_level => Regexp.last_match(2),
           :disks => []
         }
 
-        Regexp.last_match(3).scan(/ (sd[a-z]+|nvme\d+n\d+)\d*\[\d+\](?:\([A-Z]\))*/).flatten.each do |device|
-          if disk = devices[:disks].find { |d| d[:device] == "/dev/#{device}" }
-            disk[:arrays] << array[:id]
-            array[:disks] << disk[:id]
+        Regexp.last_match(3).split(" ").each do |member|
+          if member =~ /^(sd[a-z]+|nvme\d+n\d+).*/
+            device = Regexp.last_match(1)
+
+            if disk = devices[:disks].find { |d| d[:device] == "/dev/#{device}" }
+              if member =~ /\(F\)/
+                disk[:status] = "failed"
+              elsif member =~ /\(S\)/
+                disk[:status] = "hotspare"
+              else
+                disk[:status] = "online"
+              end
+
+              disk[:arrays] << array[:id]
+              array[:disks] << disk[:id]
+            end
           end
         end
 
         devices[:arrays] << array
-      elsif array && line =~ /^\s+(\d+) blocks/
+      elsif array && line =~ /^\s+(\d+) blocks.*(?:\[([U_]+)\])?/
         array[:size] = format_disk_size(Regexp.last_match(1).to_i)
+        array[:status] = "degraded" if Regexp.last_match(2) =~ /_/
+      elsif array && line =~ /^\s+\[.*\]\s+(\S+)\s+=/
+        case Regexp.last_match(1)
+        when "recovery" then array[:status] = "rebuilding"
+        when "resync" then array[:status] = "rebuilding"
+        when "checking" then array[:status] = "checking"
+        end
       end
     end
   end
@@ -287,9 +307,12 @@ Ohai.plugin(:Hardware) do
     disk = nil
 
     IO.popen(%w(ssacli controller all show config detail)).each do |line|
+      next unless line.valid_encoding?
+
       if line =~ /^Smart (?:Array|HBA) (\S+) /
         controller = {
           :id => devices[:controllers].count,
+          :type => "hp",
           :model => Regexp.last_match(1),
           :arrays => [],
           :disks => []
@@ -308,6 +331,7 @@ Ohai.plugin(:Hardware) do
         when "Hardware Revision" then controller[:hardware_version] = Regexp.last_match(2)
         when "Firmware Version" then controller[:firmware_version] = Regexp.last_match(2)
         when "PCI Address (Domain:Bus:Device.Function)" then controller[:pci_slot] = Regexp.last_match(2)
+        when "Battery/Capacitor Status" then controller[:battery_status] = Regexp.last_match(2).split.first.downcase
         end
       elsif controller && line =~ /^      Logical Drive: (\d+)$/
         array = {
@@ -334,6 +358,8 @@ Ohai.plugin(:Hardware) do
         array[:disks] << disk[:id]
       elsif disk && line =~ /^         (\S[^:]+):\s+(.*\S)\s*$/
         case Regexp.last_match(1)
+        when "Status" then disk[:status] = Regexp.last_match(2)
+        when "Drive Type" then disk[:drive_type] = Regexp.last_match(2)
         when "Interface Type" then disk[:interface] = Regexp.last_match(2)
         when "Size" then disk[:size] = Regexp.last_match(2)
         when "Rotational Speed" then disk[:rpm] = Regexp.last_match(2)
@@ -341,10 +367,17 @@ Ohai.plugin(:Hardware) do
         when "Serial Number" then disk[:serial_number] = Regexp.last_match(2)
         when "Model" then disk[:model] = Regexp.last_match(2)
         end
+      elsif array && line =~ /^         Status:\s+(.*\S)\s*$/
+        case Regexp.last_match(1)
+        when "OK" then array[:status] = "optimal"
+        when "Interim Recovery Mode" then array[:status] = "degraded"
+        else array[:status] = "unknown"
+        end
       elsif array && line =~ /^         (\S[^:]+):\s+(.*\S)\s*$/
         case Regexp.last_match(1)
         when "Size" then array[:size] = Regexp.last_match(2)
         when "Fault Tolerance" then array[:raid_level] = Regexp.last_match(2)
+        when "Status" then array[:status] = Regexp.last_match(2)
         when "Disk Name" then array[:device] = Regexp.last_match(2).strip
         when "Mount Points" then array[:mount_point] = Regexp.last_match(2).split.first
         when "Unique Identifier" then array[:wwn] = Regexp.last_match(2)
@@ -371,13 +404,34 @@ Ohai.plugin(:Hardware) do
     end
 
     devices[:disks].each do |disk|
-     disk[:smart_device] = "cciss,#{disks.find_index(disk[:location])}"
+      controller = disk[:controller]
+
+      next unless devices[:controllers][controller][:type] == "hp"
+
+      disk[:smart_device] = "cciss,#{disks.find_index(disk[:location])}"
+
+      if disk[:status] == "Failed"
+        disk[:status] = "failed"
+      elsif disk[:status] == "Predictive Failure"
+        disk[:status] = "failed"
+      elsif disk[:status] == "OK" && disk[:drive_type] == "Data Drive"
+        disk[:status] = "online"
+      elsif disk[:status] == "OK" && disk[:drive_type] == "Spare Drive"
+        disk[:status] = "hotspare"
+      elsif disk[:drive_type] == "Unassigned Drive"
+        disk[:status] = "unconfigured"
+      else
+        disk[:status] = "unknown"
+      end
+
+      disk.delete(:drive_type)
     end
   end
 
   def find_megaraid_disks(devices)
     controllers = []
     arrays = []
+    disks = []
 
     controller = nil
     array = nil
@@ -387,6 +441,7 @@ Ohai.plugin(:Hardware) do
       if line =~ /^PCI information for Controller (\d+)$/
         controller = {
           :id => devices[:controllers].count,
+          :type => "megaraid",
           :arrays => [],
           :disks => []
         }
@@ -394,11 +449,11 @@ Ohai.plugin(:Hardware) do
         devices[:controllers] << controller
 
         controllers << controller
-      elsif line =~ /^Bus Number\s+:\s+(\d+)$/
+      elsif line =~ /^Bus Number\s+:\s+([0-9a-f]+)$/i
         controller[:pci_slot] = format "0000:%02x", Integer("0x#{Regexp.last_match(1)}")
-      elsif line =~ /^Device Number\s+:\s+(\d+)$/
+      elsif line =~ /^Device Number\s+:\s+([0-9a-f]+)$/i
         controller[:pci_slot] = format "%s:%02x", controller[:pci_slot], Integer("0x#{Regexp.last_match(1)}")
-      elsif line =~ /^Function Number\s+:\s+(\d+)$/
+      elsif line =~ /^Function Number\s+:\s+([0-9a-f]+)$/i
         controller[:pci_slot] = format "%s.%01x", controller[:pci_slot], Integer("0x#{Regexp.last_match(1)}")
       end
     end
@@ -447,24 +502,44 @@ Ohai.plugin(:Hardware) do
         devices[:disks] << disk
         controller[:disks] << disk[:id]
         array[:disks] << disk[:id]
-      elsif disk && line =~ /^Firmware state:\s+(.*\S)\s*$/
-        Regexp.last_match(1).split(/,\s*/).each do |state|
-          case state
-          when "Unconfigured(bad)" then disk[:status] = "unconfigured"
-          when "Online" then disk[:status] = "online"
-          when "Hotspare" then disk[:status] = "hotspare"
-          when "Failed" then disk[:status] = "failed"
-          when "Spun Up" then disk[:state] = "spun_up"
-          when "Spun down" then disk[:state] = "spun_down"
-          end
+
+        disks << disk
+      elsif disk && line =~ /^Firmware state:\s+(\S.*)$/
+        status, state = Regexp.last_match(1).split(/,\s*/)
+        case status
+        when "Unconfigured(good)" then disk[:status] = "unconfigured"
+        when "Unconfigured(bad)" then disk[:status] = "unconfigured"
+        when "Hotspare" then disk[:status] = "hotspare"
+        when "Offline" then disk[:status] = "offline"
+        when "Online" then disk[:status] = "online"
+        when "Rebuild" then disk[:status] = "rebuilding"
+        when "Failed" then disk[:status] = "failed"
+        when "Copyback" then disk[:status] = "rebuilding"
+        else disk[:status] = "unknown"
+        end
+        case state
+        when "Spun Up" then disk[:state] = "spun_up"
+        when "Spun down" then disk[:state] = "spun_down"
+        else disk[:state] = "unknown"
         end
       elsif disk && line =~ /^(\S.*\S)\s*:\s+(\S.*)$/
         case Regexp.last_match(1)
-        when "Device Id" then disk[:smart_device] = "megaraid,#{Regexp.last_match(2)}"
+        when "Device Id" then disk[:device_id] = Regexp.last_match(2)
         when "WWN" then disk[:wwn] = Regexp.last_match(2)
         when "PD Type" then disk[:interface] = Regexp.last_match(2)
         when "Raw Size" then disk[:size] = memory_to_disk_size(Regexp.last_match(2).sub(/\s*\[.*\]$/, ""))
         when "Inquiry Data" then disk[:vendor], disk[:model], disk[:serial_number] = Regexp.last_match(2).split
+        end
+      elsif array && line =~ /^State\s*:\s+(.*\S)\s*$/
+        case Regexp.last_match(1)
+        when "Partially Degraded" then array[:status] = "degraded"
+        when "Degraded" then array[:status] = "degraded"
+        when "Optimal" then array[:status] = "optimal"
+        when "Consistency Check" then array[:status] = "checking"
+        when "Background Initialization" then array[:status] = "initialising"
+        when "Initialization" then array[:status] = "initialising"
+        when "Reconstruction" then array[:status] = "rebuilding"
+        else array[:status] = "unknown"
         end
       elsif array && line =~ /^(\S.*\S)\s*:\s+(\S.*)$/
         case Regexp.last_match(1)
@@ -479,7 +554,8 @@ Ohai.plugin(:Hardware) do
         controller = controllers[Regexp.last_match(1).to_i]
       elsif controller && line =~ /^Enclosure Device ID: \d+$/
         disk = {
-          :controller => controller[:id]
+          :controller => controller[:id],
+          :arrays => []
         }
       elsif disk && line =~ /^WWN:\s+(\S+)$/
         unless devices[:disks].find { |d| d[:wwn] == Regexp.last_match(1) }
@@ -487,21 +563,30 @@ Ohai.plugin(:Hardware) do
           disk[:wwn] = Regexp.last_match(1)
 
           devices[:disks] << disk
+
+          disks << disk
         end
-      elsif disk && line =~ /^Firmware state:\s+(.*\S)\s*$/
-        Regexp.last_match(1).split(/,\s*/).each do |state|
-          case state
-          when "Unconfigured(bad)" then disk[:status] = "unconfigured"
-          when "Online" then disk[:status] = "online"
-          when "Hotspare" then disk[:status] = "hotspare"
-          when "Failed" then disk[:status] = "failed"
-          when "Spun Up" then disk[:state] = "spun_up"
-          when "Spun down" then disk[:state] = "spun_down"
-          end
+      elsif disk && line =~ /^Firmware state:\s+(\S.*)$/
+        status, state = Regexp.last_match(1).split(/,\s*/)
+        case status
+        when "Unconfigured(good)" then disk[:status] = "unconfigured"
+        when "Unconfigured(bad)" then disk[:status] = "unconfigured"
+        when "Hotspare" then disk[:status] = "hotspare"
+        when "Offline" then disk[:status] = "offline"
+        when "Online" then disk[:status] = "online"
+        when "Rebuild" then disk[:status] = "rebuilding"
+        when "Failed" then disk[:status] = "failed"
+        when "Copyback" then disk[:status] = "rebuilding"
+        else disk[:status] = "unknown"
+        end
+        case state
+        when "Spun Up" then disk[:state] = "spun_up"
+        when "Spun down" then disk[:state] = "spun_down"
+        else disk[:state] = "unknown"
         end
       elsif disk && line =~ /^(\S.*\S)\s*:\s+(\S.*)$/
         case Regexp.last_match(1)
-        when "Device Id" then disk[:smart_device] = "megaraid,#{Regexp.last_match(2)}"
+        when "Device Id" then disk[:device_id] = Regexp.last_match(2)
         when "PD Type" then disk[:interface] = Regexp.last_match(2)
         when "Raw Size" then disk[:size] = memory_to_disk_size(Regexp.last_match(2).sub(/\s*\[.*\]$/, ""))
         when "Inquiry Data" then disk[:vendor], disk[:model], disk[:serial_number] = Regexp.last_match(2).split
@@ -512,6 +597,18 @@ Ohai.plugin(:Hardware) do
     controllers.each do |controller|
       if device = Dir.glob("/sys/bus/pci/devices/#{controller[:pci_slot]}/host*/target*:2:0/*/scsi_generic/sg*").first
         controller[:device] = "/dev/#{File.basename(device)}"
+      end
+    end
+
+    disks.each do |disk|
+      controller = devices[:controllers][disk[:controller]]
+
+      if id = disk.delete(:device_id)
+        if device = Dir.glob("/sys/bus/pci/devices/#{controller[:pci_slot]}/host*/target0:0:#{id}/0:0:#{id}:0/block/sd*").first
+          disk[:device] = "/dev/#{File.basename(device)}"
+        else
+          disk[:smart_device] = "megaraid,#{id}"
+        end
       end
     end
   end
@@ -526,6 +623,7 @@ Ohai.plugin(:Hardware) do
       if line =~ /^\/proc\/mpt\/ioc(\d+)\s+LSI Logic\s+(\S+)\s+/
         controller = {
           :id => devices[:controllers].count,
+          :type => "mpt1",
           :model => Regexp.last_match(1),
           :arrays => [],
           :disks => []
@@ -602,6 +700,7 @@ Ohai.plugin(:Hardware) do
       next unless line =~ /^\s+(\d+)\s+(\S+)\s+\h+h\s+\h+h\s+(\S+)\s+\h+h\s+\h+h\s*$/
       controllers[Regexp.last_match(1).to_i] = {
         :id => devices[:controllers].count,
+        :type => "mpt2",
         :model => Regexp.last_match(2),
         :pci_slot => Regexp.last_match(3).sub(/^(\h{2})h:(\h{2})h:(\h{2})h:0(\h)h$/, "00\\1:\\2:\\3.\\4"),
         :arrays => [],
@@ -642,6 +741,23 @@ Ohai.plugin(:Hardware) do
           controller[:disks] << disk[:id]
 
           disks << disk
+        elsif disk && line =~ /^  State\s+:\s+(.*\S)\s*$/
+          Regexp.last_match(1).split(/,\s*/).each do |state|
+            case state
+            when "Online (ONL)" then disk[:status] = "online"
+            when "Hot Spare (HSP)" then disk[:status] = "hotspare"
+            when "Ready (RDY)" then disk[:status] = "unconfigured"
+            when "Available (AVL)" then disk[:status] = "unconfigured"
+            when "Failed (FLD)" then disk[:status] = "failed"
+            when "Missing (MIS)" then disk[:status] = "missing"
+            when "Standby (SBY)" then disk[:status] = "unconfigured"
+            when "Out of Sync (OSY)" then disk[:status] = "degraded"
+            when "Degraded (DGD)" then disk[:status] = "degraded"
+            when "Rebuilding (RBLD)" then disk[:status] = "rebuilding"
+            when "Optimal (OPT)" then disk[:status] = "online"
+            else disk[:status] = "unknown"
+            end
+          end
         elsif disk && line =~ /^  (\S.*\S)\s+:\s+(.*\S)\s*$/
           case Regexp.last_match(1)
           when "Enclosure #" then disk[:location] = Regexp.last_match(2)
@@ -656,6 +772,18 @@ Ohai.plugin(:Hardware) do
           end
         elsif array && line =~ /^  PHY\[\d+\] Enclosure#\/Slot#\s+:\s+(\d+:\d+)\s*$/
           array[:disks] << Regexp.last_match(1)
+        elsif array && line =~ /^  Status of volume\s+:\s+(.*\S)\s*$/
+          Regexp.last_match(1).split(/,\s*/).each do |state|
+            case state
+            when "Okay (OKY)" then array[:status] = "optimal"
+            when "Degraded (DGD)" then array[:status] = "degraded"
+            when "Failed (FLD)" then array[:status] = "failed"
+            when "Missing (MIS)" then array[:status] = "missing"
+            when "Initializing (INIT)" then array[:status] = "initialising"
+            when "Online (ONL)" then array[:status] = "optimal"
+            else array[:status] = "unknown"
+            end
+          end
         elsif array && line =~ /^  (\S.*\S)\s+:\s+(.*\S)\s*$/
           case Regexp.last_match(1)
           when "Volume wwid" then array[:device] = find_sas_device(Regexp.last_match(2))
@@ -688,6 +816,7 @@ Ohai.plugin(:Hardware) do
       controller = {
         :id => devices[:controllers].count,
         :number => controller_number,
+        :type => "adaptec",
         :arrays => [],
         :disks => []
       }
@@ -729,6 +858,16 @@ Ohai.plugin(:Hardware) do
         elsif disk && line =~ /^         Reported Channel,Device\(T:L\)\s*:\s+(\d+),(\d+)\(\d+:0\)\s*$/
           disk[:channel_number] = Regexp.last_match(1)
           disk[:device_number] = Regexp.last_match(2)
+        elsif disk && line =~ /^         State\s*:\s+(\S.*\S)\s*$/
+          case Regexp.last_match(1)
+          when "Online" then disk[:status] = "online"
+          when "Online (JBOD)" then disk[:status] = "online"
+          when "Hot Spare" then disk[:status] = "hotspare"
+          when "Ready" then disk[:status] = "unconfigured"
+          when "Global Hot-Spare" then disk[:status] = "hostspare"
+          when "Dedicated Hot-Spare" then disk[:status] = "hotspare"
+          else disk[:status] = "unknown"
+        end
         elsif disk && line =~ /^         (\S.*\S)\s*:\s+(\S.*\S)\s*$/
           case Regexp.last_match(1)
           when "Reported Location" then disk[:location] = Regexp.last_match(2)
@@ -744,6 +883,11 @@ Ohai.plugin(:Hardware) do
           end
         elsif array && line =~ / Present \(.*((?:Connector|Enclosure):\d+,\s*(?:Device|Slot):\d+)\) /
           array[:disks] << Regexp.last_match(1).tr(":", " ").gsub(/,\s*/, ", ")
+        elsif array && line =~ /^   Status of Logical Device\s*:\s+(\S.*\S)\s*$/
+          case Regexp.last_match(1)
+          when "Optimal" then array[:status] = "optimal"
+          else array[:status] = "unknown"
+        end
         elsif array && line =~ /^   (\S.*\S)\s*:\s+(\S.*\S)\s*$/
           case Regexp.last_match(1)
           when "RAID level" then array[:raid_level] = Regexp.last_match(2)
@@ -792,6 +936,7 @@ Ohai.plugin(:Hardware) do
   def find_areca_disks(devices)
     controller = {
       :id => devices[:controllers].count,
+      :type => "areca",
       :arrays => [],
       :disks => []
     }
@@ -844,6 +989,11 @@ Ohai.plugin(:Hardware) do
           device = Dir.glob("/sys/bus/pci/devices/#{pci_slot}/host*/target*:0:0/0:#{channel}:#{id}:#{lun}/block/*").first
 
           array[:device] = "/dev/#{File.basename(device)}"
+        elsif line =~ /^Volume State\s+:\s+(.*\S)\s*$/
+          case Regexp.last_match(1)
+          when "Normal" then array[:status] = "optimal"
+          else array[:status] = "unknown"
+          end
         elsif line =~ /^(\S.*\S)\s+:\s+(.*\S)\s*$/
           case Regexp.last_match(1)
           when "Volume Set Name" then array[:volume_set] = Regexp.last_match(2)
@@ -885,6 +1035,11 @@ Ohai.plugin(:Hardware) do
           disk[:smart_device] = "areca,#{Regexp.last_match(1)}"
         elsif line =~ /^Device Location\s+:\s+Enclosure#(\d+) Slot#?\s*0*(\d+)\s*$/i
           disk[:smart_device] = "areca,#{Regexp.last_match(2)}/#{Regexp.last_match(1)}"
+        elsif line =~ /^Device State\s+:\s+(.*\S)\s*$/
+          case Regexp.last_match(1)
+          when "NORMAL" then disk[:status] = "online"
+          else disk[:status] = "unknown"
+          end
         elsif line =~ /^(\S.*\S)\s+:\s+(.*\S)\s*$/
           case Regexp.last_match(1)
           when "Model Name" then disk[:vendor], disk[:model] = Regexp.last_match(2).split

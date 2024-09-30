@@ -1,0 +1,34 @@
+# DO NOT EDIT - This file is being maintained by Chef
+
+<% [80, 443].each do |port| -%>
+<VirtualHost *:<%= port %>>
+
+  ServerName join.osmfoundation.org
+  ServerAlias crm.osmfoundation.org
+  ServerAlias supporting.osmfoundation.org
+  ServerAlias support.osmfoundation.org
+  ServerAlias support.openstreetmap.org
+  ServerAlias supporting.osm.org
+  ServerAlias support.osm.org
+
+  ServerAdmin webmaster@openstreetmap.org
+
+  RewriteEngine on
+
+<% if port == 80 -%>
+  RewriteRule ^/\.well-known/acme-challenge/(.*)$ http://acme.openstreetmap.org/.well-known/acme-challenge/$1 [R=permanent,L]
+<% end -%>
+<% if port == 443 -%>
+  SSLEngine on
+  SSLCertificateFile /etc/ssl/certs/join.osmfoundation.org.pem
+  SSLCertificateKeyFile /etc/ssl/private/join.osmfoundation.org.key
+<% end -%>
+
+  RewriteRule ^/(.*)$ https://supporting.openstreetmap.org/$1 [R=307,L]
+
+  CustomLog /var/log/apache2/join.osmfoundation.org-access.log combined_extended
+  ErrorLog /var/log/apache2/join.osmfoundation.org-error.log
+
+</VirtualHost>
+
+<% end -%>

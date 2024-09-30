@@ -20,7 +20,32 @@
 cache_dir = Chef::Config[:file_cache_path]
 
 chef_version = node[:chef][:client][:version]
-chef_package = "chef_#{chef_version}-1_amd64.deb"
+
+chef_platform = if platform?("debian")
+                  "debian"
+                else
+                  "ubuntu"
+                end
+
+chef_arch = if arm?
+              "arm64"
+            else
+              "amd64"
+            end
+
+os_release = if platform?("debian") && node[:lsb][:release].to_f > 11
+               11
+             else
+               node[:lsb][:release]
+             end
+
+# Chef is currently not available for Debian 11 on arm64.
+if chef_platform == "debian" && os_release == 11 && chef_arch == "arm64"
+  chef_platform = "ubuntu"
+  os_release = "22.04"
+end
+
+chef_package = "chef_#{chef_version}-1_#{chef_arch}.deb"
 
 directory "/var/cache/chef" do
   action :delete
@@ -37,7 +62,7 @@ Dir.glob("#{cache_dir}/chef_*.deb").each do |deb|
 end
 
 remote_file "#{cache_dir}/#{chef_package}" do
-  source "https://packages.chef.io/files/stable/chef/#{chef_version}/ubuntu/#{node[:lsb][:release]}/#{chef_package}"
+  source "https://packages.chef.io/files/stable/chef/#{chef_version}/#{chef_platform}/#{os_release}/#{chef_package}"
   owner "root"
   group "root"
   mode "644"
@@ -83,19 +108,6 @@ template "/etc/logrotate.d/chef" do
   mode "644"
 end
 
-directory "/etc/chef/trusted_certs" do
-  owner "root"
-  group "root"
-  mode "755"
-end
-
-template "/etc/chef/trusted_certs/verisign.pem" do
-  source "verisign.pem.erb"
-  owner "root"
-  group "root"
-  mode "644"
-end
-
 directory node[:ohai][:plugin_dir] do
   owner "root"
   group "root"
@@ -111,6 +123,7 @@ end
 systemd_service "chef-client" do
   description "Chef client"
   exec_start "/usr/bin/chef-client"
+  nice 10
 end
 
 systemd_timer "chef-client" do
@@ -123,9 +136,4 @@ end
 
 service "chef-client.timer" do
   action [:enable, :start]
-end
-
-service "chef-client.service" do
-  action :disable
-  subscribes :stop, "service[chef-client.timer]"
 end

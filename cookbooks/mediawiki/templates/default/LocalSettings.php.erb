@@ -54,6 +54,15 @@ $wgEmailAuthentication = true;
 
 $wgEnotifUseJobQ       = true;
 
+$wgSMTP = [
+  "host" => "localhost",
+  "socket_options" => [
+    "ssl" => [
+      "verify_peer_name" => false
+    ]
+  ]
+];
+
 ## Database settings
 $wgDBtype           = "mysql";
 $wgDBserver         = "<%= @database_params[:host] %>";
@@ -72,6 +81,9 @@ $wgDBmysql5 = false;
 
 ## Shared memory settings
 $wgMainCacheType    = CACHE_MEMCACHED;
+$wgParserCacheType  = CACHE_MEMCACHED;
+$wgMessageCacheType = CACHE_MEMCACHED;
+$wgSessionCacheType = CACHE_MEMCACHED;
 $wgMemCachedServers = array('127.0.0.1:11211');
 $wgSessionsInObjectCache = TRUE;
 
@@ -112,22 +124,6 @@ $wgSVGConverters = array( 'rsvg' => '/usr/bin/rsvg-convert -w $width -h $height 
 $wgSVGConverter = 'rsvg';
 $wgSVGMaxSize = 2000;
 
-<% if @mediawiki[:commons] -%>
-# Enable use of images from https://commons.wikimedia.org
-$wgForeignFileRepos[] = [
-  'class' => ForeignAPIRepo::class,
-  'name' => 'wikimediacommons',
-  'apibase' => 'https://commons.wikimedia.org/w/api.php',
-  'url' => 'https://upload.wikimedia.org/wikipedia/commons',
-  'thumbUrl' => 'https://upload.wikimedia.org/wikipedia/commons/thumb',
-  'hashLevels' => 2,
-  'transformVia404' => true,
-  'fetchDescription' => true,
-  'descriptionCacheExpiry' => 604800,
-  'apiThumbCacheExpiry' => 604800,
-];
-<% end -%>
-
 ## If you use ImageMagick (or any other shell command) on a
 ## Linux server, this will need to be set to the name of an
 ## available UTF-8 locale
@@ -142,7 +138,7 @@ $wgShellLocale = "en_US.utf8";
 ## Set $wgCacheDirectory to a writable directory on the web server
 ## to make your wiki go slightly faster. The directory should not
 ## be publically accessible from the web.
-#$wgCacheDirectory = "$IP/cache";
+$wgCacheDirectory = "$IP/cache";
 
 # Site language code, should be one of the list in ./languages/Names.php
 $wgLanguageCode = "en";
@@ -186,16 +182,6 @@ $wgResourceLoaderMaxQueryLength = -1;
 # Only Allow Signed-in users to edit
 $wgGroupPermissions['*']['edit'] = false;
 
-# Only allow autoconfirmed for a few actions
-$wgGroupPermissions['user']['move'] = false;
-$wgGroupPermissions['user']['movefile'] = false;
-$wgGroupPermissions['user']['move-categorypages'] = false;
-$wgGroupPermissions['user']['upload'] = false;
-$wgGroupPermissions['autoconfirmed']['move'] = true;
-$wgGroupPermissions['autoconfirmed']['movefile'] = true;
-$wgGroupPermissions['autoconfirmed']['move-categorypages'] = true;
-$wgGroupPermissions['autoconfirmed']['upload'] = true;
-
 # Allow bureaucrat group access to oversight options
 $wgGroupPermissions['bureaucrat']['hideuser'] = true;
 $wgGroupPermissions['bureaucrat']['deletelogentry'] = true;
@@ -224,8 +210,8 @@ $wgGroupPermissions['sysop']['gadgets-definition-edit'] = true;
 $wgGroupPermissions['*']['createaccount'] = false;
 $wgGroupPermissions['user']['createaccount'] = true;
 <% end -%>
-<% if @mediawiki[:private_site] -%>
 
+<% if @mediawiki[:private_site] -%>
 # Disable reading by anonymous users
 $wgGroupPermissions['*']['read'] = false;
 
@@ -239,19 +225,17 @@ $wgGroupPermissions['*']['createaccount'] = false;
 $wgUploadPath = "$wgScriptPath/img_auth.php";
 <% end -%>
 
-<% if not(@mediawiki[:private_accounts]) and not(@mediawiki[:private_site]) -%>
-# user group "confirmed" with identical rights as "autoconfirmed", but assigned manually by sysops
-$wgGroupPermissions['confirmed'] = $wgGroupPermissions['autoconfirmed'];
-$wgAddGroups['sysop'][] = 'confirmed';
-$wgRemoveGroups['sysop'][] = 'confirmed';
-<% end -%>
-
 # Allow Subpages on Main Namespace
 $wgNamespacesWithSubpages[NS_MAIN] = true;
 
 # DNS Blacklists to use
 $wgEnableDnsBlacklist = true;
-$wgDnsBlacklistUrls = array( 'proxies.dnsbl.sorbs.net.', 'opm.tornevall.org.', 'xbl.spamhaus.org.', 'dnsbl-2.uceprotect.net.' );
+$wgDnsBlacklistUrls = [
+  'proxies.dnsbl.sorbs.net.',
+  'opm.tornevall.org.',
+  'xbl.spamhaus.org.',
+  'dnsbl-2.uceprotect.net.'
+];
 
 # Require validated email to edit
 $wgEmailConfirmToEdit = true;
@@ -259,35 +243,62 @@ $wgEmailConfirmToEdit = true;
 # Extend autoblock period
 $wgAutoblockExpiry = 7776000; // 90 days
 
-# Autopromote users to autoconfirmed
-$wgAutoConfirmAge = 345600; // 4 days
-$wgAutoConfirmCount = 10;
-
 # Disable Hit Counter for Performance
 $wgDisableCounters = TRUE;
 # Disable IP in Header to avoid cache issue
 $wgShowIPinHeader = FALSE;
 
-# Job Runs mostly by cron
-$wgJobRunRate = 0.01;
+# Job Runs by cron
+$wgJobRunRate = 0;
 
 # dissolves double redirects automatically
 $wgFixDoubleRedirects = TRUE;
 
 # Allow external images from a few sites
-$wgAllowExternalImagesFrom = array( 'http://tile.openstreetmap.org/', 'https://tile.openstreetmap.org', 'http://josm.openstreetmap.de/', 'http://trac.openstreetmap.org/', 'http://rweait.dev.openstreetmap.org/' );
+$wgAllowExternalImagesFrom = [
+  'http://tile.openstreetmap.org/',
+  'https://tile.openstreetmap.org',
+  'http://josm.openstreetmap.de/'
+];
 
-$wgNoFollowDomainExceptions = array( 'www.openstreetmap.org', 'josm.openstreetmap.de', 'taginfo.openstreetmap.org', 'blog.openstreetmap.org', 'wiki.osmfoundation.org' );
-
-# FIXME - move to specific
-# defines which links of the sidebar are translatable
-$wgForceUIMsgAsContentMsg = array( 'mainpage-url', 'mapfeatures-url', 'contributors-url', 'helppage', 'blogs-url', 'shop-url', 'sitesupport-url' );
+$wgNoFollowDomainExceptions = [
+  'www.openstreetmap.org',
+  'josm.openstreetmap.de',
+  'taginfo.openstreetmap.org',
+  'blog.openstreetmap.org',
+  'forum.openstreetmap.org',
+  'community.openstreetmap.org',
+  'lists.openstreetmap.org',
+  'help.openstreetmap.org',
+  'switch2osm.org',
+  'wiki.osmfoundation.org',
+  'www.openstreetmap.us',
+  'learnosm.org',
+  'nominatim.org',
+  'openstreetmap.community',
+  'www.openstreetbrowser.org',
+  'openinframap.org',
+  'leafletjs.com'
+];
 
 # FIXME - move to specific
 $wgAllowUserJs = TRUE;
 $wgAllowUserCss = TRUE;
 
-# FIXME - move to specific
+# Raise expensive lua (and other function) call limits to match WP
+# Docs:  https://www.mediawiki.org/wiki/Manual:$wgExpensiveParserFunctionLimit
+# Wikipedia's Config:  https://noc.wikimedia.org/conf/highlight.php?file=CommonSettings.php
+$wgExpensiveParserFunctionLimit = 500;
+
+
+<% if @mediawiki[:site_notice] -%>
+$wgSiteNotice = "<%= @mediawiki[:site_notice] %>";
+<% end -%>
+<% if @mediawiki[:site_readonly] -%>
+$wgReadOnly = "<%= @mediawiki[:site_readonly] %>";
+<% end -%>
+
+<% if @name == "wiki.openstreetmap.org" -%>
 # DE
 define('NS_LANG_DE', 200);
 $wgExtraNamespaces[NS_LANG_DE] = 'DE';
@@ -351,6 +362,17 @@ define('NS_LANG_JA_TALK', 213);
 $wgExtraNamespaces[NS_LANG_JA_TALK] = 'JA_talk';
 $wgNamespacesWithSubpages[NS_LANG_JA_TALK] = TRUE;
 
+# Proposal
+# namespace features a specific search weight defined at
+# cookbooks/mediawiki/templates/default/mw-ext-CirrusSearch.inc.php.erb
+define('NS_PROPOSAL', 3000);
+$wgExtraNamespaces[NS_PROPOSAL] = 'Proposal';
+$wgNamespacesWithSubpages[NS_PROPOSAL] = TRUE;
+$wgContentNamespaces[] = NS_PROPOSAL;
+define('NS_PROPOSAL_TALK', 3001);
+$wgExtraNamespaces[NS_PROPOSAL_TALK] = 'Proposal_talk';
+$wgNamespacesWithSubpages[NS_PROPOSAL_TALK] = TRUE;
+
 $wgNamespacesToBeSearchedDefault[NS_LANG_DE] = TRUE;
 $wgNamespacesToBeSearchedDefault[NS_LANG_FR] = TRUE;
 $wgNamespacesToBeSearchedDefault[NS_LANG_ES] = TRUE;
@@ -358,21 +380,57 @@ $wgNamespacesToBeSearchedDefault[NS_LANG_IT] = TRUE;
 $wgNamespacesToBeSearchedDefault[NS_LANG_NL] = TRUE;
 $wgNamespacesToBeSearchedDefault[NS_LANG_RU] = TRUE;
 $wgNamespacesToBeSearchedDefault[NS_LANG_JA] = TRUE;
+$wgNamespacesToBeSearchedDefault[NS_PROPOSAL] = TRUE;
 
-
-# Raise expensive lua (and other function) call limits to match WP
-# Docs:  https://www.mediawiki.org/wiki/Manual:$wgExpensiveParserFunctionLimit
-# Wikipedia's Config:  https://noc.wikimedia.org/conf/highlight.php?file=CommonSettings.php
-$wgExpensiveParserFunctionLimit = 500;
-
-
-<% if @mediawiki[:site_notice] -%>
-$wgSiteNotice = "<%= @mediawiki[:site_notice] %>";
-<% end -%>
-<% if @mediawiki[:site_readonly] -%>
-$wgReadOnly = "<%= @mediawiki[:site_readonly] %>";
+# defines which links of the sidebar are translatable
+$wgForceUIMsgAsContentMsg = array( 'mainpage-url', 'mapfeatures-url', 'contributors-url', 'helppage', 'blogs-url', 'shop-url', 'sitesupport-url' );
 <% end -%>
 
+# load extensions
 <% Dir.glob("#{@directory}/LocalSettings.d/*.php") do |file| -%>
 <%= "require_once('#{file}');" %>
 <% end -%>
+
+<% if @name == "wiki.openstreetmap.org" -%>
+# wiki.openstreetmap.org specific config loaded after extensions
+$wgRCWatchCategoryMembership = true;
+<% end -%>
+
+<% if not(@mediawiki[:private_accounts]) and not(@mediawiki[:private_site]) -%>
+# require user confirmation for certain actions
+$wgGroupPermissions['user']['move'] = false;
+$wgGroupPermissions['user']['movefile'] = false;
+$wgGroupPermissions['user']['move-categorypages'] = false;
+$wgGroupPermissions['user']['upload'] = false;
+$wgGroupPermissions['autoconfirmed']['move'] = true;
+$wgGroupPermissions['autoconfirmed']['movefile'] = true;
+$wgGroupPermissions['autoconfirmed']['move-categorypages'] = true;
+$wgGroupPermissions['autoconfirmed']['upload'] = true;
+# Autopromote users to autoconfirmed
+$wgAutoConfirmAge = 345600; // 4 days
+$wgAutoConfirmCount = 10;
+
+# user group "confirmed" with identical rights as "autoconfirmed", but assigned manually by sysops
+$wgGroupPermissions['confirmed'] = $wgGroupPermissions['autoconfirmed'];
+$wgAddGroups['sysop'][] = 'confirmed';
+$wgRemoveGroups['sysop'][] = 'confirmed';
+<% end -%>
+
+<% if @mediawiki[:private_accounts] or @mediawiki[:private_site] -%>
+# disable automatic confirmation of users, grant all "autoconfirmed" rights to all users
+$wgAutoConfirmAge = 0;
+$wgAutoConfirmCount = 0;
+$wgGroupPermissions['user'] = array_merge( $wgGroupPermissions['user'], $wgGroupPermissions['autoconfirmed'] );
+
+unset( $wgGroupPermissions['autoconfirmed'] );
+unset( $wgRevokePermissions['autoconfirmed'] );
+unset( $wgAddGroups['autoconfirmed'] );
+unset( $wgRemoveGroups['autoconfirmed'] );
+unset( $wgGroupsAddToSelf['autoconfirmed'] );
+unset( $wgGroupsRemoveFromSelf['autoconfirmed'] );
+<% end -%>
+
+# Increase curl timeout to allow parsoid requests to heavy pages like Map Features
+# Mediawiki 1.38 has fix to allow this to be set by $wgVirtualRestConfig
+# https://phabricator.wikimedia.org/T285478
+$wgHTTPTimeout = 240;

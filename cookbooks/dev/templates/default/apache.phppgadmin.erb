@@ -8,7 +8,7 @@
 	SSLCertificateFile /etc/ssl/certs/phppgadmin.dev.openstreetmap.org.pem
 	SSLCertificateKeyFile /etc/ssl/private/phppgadmin.dev.openstreetmap.org.key
 
-	CustomLog /var/log/apache2/phppgadmin.dev.openstreetmap.org-access.log combined
+	CustomLog /var/log/apache2/phppgadmin.dev.openstreetmap.org-access.log combined_extended
 	ErrorLog /var/log/apache2/phppgadmin.dev.openstreetmap.org-error.log
 
 	DocumentRoot /usr/share/phppgadmin
@@ -16,16 +16,16 @@
 	# Remove Proxy request header to mitigate https://httpoxy.org/
 	RequestHeader unset Proxy early
 
-	ProxyPassMatch ^/(.*\.php(/.*)?)$ unix:/run/php/default.sock|fcgi://127.0.0.1
-	ProxyPassMatch ^/(.*\.phpx(/.*)?)$ unix:/run/php/default.sock|fcgi://127.0.0.1
-	ProxyPassMatch ^/(.*\.phpj(/.*)?)$ unix:/run/php/default.sock|fcgi://127.0.0.1
+	ProxyPassMatch ^/(.*\.php(/.*)?)$ unix:/run/php/php-default-fpm.sock|fcgi://127.0.0.1
+	ProxyPassMatch ^/(.*\.phpx(/.*)?)$ unix:/run/php/php-default-fpm.sock|fcgi://127.0.0.1
+	ProxyPassMatch ^/(.*\.phpj(/.*)?)$ unix:/run/php/php-default-fpm.sock|fcgi://127.0.0.1
 </VirtualHost>
 
 <VirtualHost *:80>
 	ServerName phppgadmin.dev.openstreetmap.org
 	ServerAdmin webmaster@openstreetmap.org
 
-	CustomLog /var/log/apache2/phppgadmin.dev.openstreetmap.org-access.log combined
+	CustomLog /var/log/apache2/phppgadmin.dev.openstreetmap.org-access.log combined_extended
 	ErrorLog /var/log/apache2/phppgadmin.dev.openstreetmap.org-error.log
 
 	RedirectPermanent /.well-known/acme-challenge/ http://acme.openstreetmap.org/.well-known/acme-challenge/

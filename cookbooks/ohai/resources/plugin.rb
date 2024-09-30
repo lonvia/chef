@@ -29,7 +29,7 @@ action :create do
     action :nothing
   end
 
-  directory "/etc/chef/ohai" do
+  directory "/etc/chef/ohai/plugins" do
     owner "root"
     group "root"
     mode "755"
@@ -53,6 +53,6 @@ end
 
 action_class do
   def plugin_path
-    "/etc/chef/ohai/#{new_resource.plugin}.rb"
+    "/etc/chef/ohai/plugins/#{new_resource.plugin}.rb"
   end
 end

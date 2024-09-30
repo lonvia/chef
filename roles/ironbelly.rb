@@ -2,12 +2,6 @@ name "ironbelly"
 description "Master role applied to ironbelly"
 
 default_attributes(
-  :apt => {
-    :sources => ["ubuntugis-unstable"]
-  },
-  :bind => {
-    :clients => "equinix-ams"
-  },
   :dhcpd => {
     :first_address => "10.0.63.1",
     :last_address => "10.0.63.254"
@@ -32,85 +26,53 @@ default_attributes(
   },
   :networking => {
     :interfaces => {
-      :internal_ipv4 => {
+      :internal => {
         :interface => "bond0",
         :role => :internal,
-        :family => :inet,
-        :address => "10.0.48.10",
+        :inet => {
+          :address => "10.0.48.10"
+        },
         :bond => {
-          :slaves => %w[eth0 eth1]
+          :mode => "802.3ad",
+          :lacprate => "fast",
+          :xmithashpolicy => "layer3+4",
+          :slaves => %w[enp2s0f0 enp2s0f1]
         }
       },
-      :external_ipv4 => {
-        :interface => "bond0.2",
+      :external => {
+        :interface => "bond0.3",
         :role => :external,
-        :family => :inet,
-        :address => "130.117.76.10"
-      },
-      :external_ipv6 => {
-        :interface => "bond0.2",
-        :role => :external,
-        :family => :inet6,
-        :address => "2001:978:2:2C::172:A"
+        :inet => {
+          :address => "184.104.179.138"
+        },
+        :inet6 => {
+          :address => "2001:470:1:fa1::a"
+        }
       }
     }
   },
-  :planet => {
-    :replication => "enabled"
-  },
   :prometheus => {
+    :junos => {
+      "switch1" => { :address => "184.104.179.129", :labels => { "site" => "amsterdam" } }
+    },
     :snmp => {
-      "pdu1" => { :address => "10.0.48.100", :module => "apcups", :labels => { "site" => "amsterdam" } },
-      "pdu2" => { :address => "10.0.48.101", :module => "apcups", :labels => { "site" => "amsterdam" } },
-      "switch1" => { :address => "130.117.76.2", :module => "if_mib", :labels => { "site" => "amsterdam" } }
+      "pdu1" => { :address => "10.0.48.100", :modules => %w[apcups], :labels => { "site" => "amsterdam" } },
+      "pdu2" => { :address => "10.0.48.101", :modules => %w[apcups], :labels => { "site" => "amsterdam" } }
     },
     :metrics => {
       :uplink_interface => {
         :help => "Site uplink interface name",
-        :labels => { :site => "amsterdam", :name => "te[12]/0/1" }
+        :labels => { :site => "amsterdam", :name => "ge-[01]/2/[02]" }
       }
     }
   },
-  :rsyncd => {
-    :modules => {
-      :hosts => {
-        :comment => "Host data",
-        :path => "/home/hosts",
-        :read_only => true,
-        :write_only => false,
-        :list => false,
-        :uid => "tomh",
-        :gid => "tomh",
-        :transfer_logging => false,
-        :hosts_allow => [
-          "212.110.172.32",                      # shenron
-          "2001:41c9:1:400::32",                 # shenron
-          "212.159.112.221"                      # grant
-        ]
-      },
-      :logs => {
-        :comment => "Log files",
-        :path => "/store/logs",
-        :read_only => false,
-        :write_only => true,
-        :list => false,
-        :uid => "www-data",
-        :gid => "www-data",
-        :transfer_logging => false,
-        :hosts_allow => [
-          "193.60.236.0/24",          # ucl external
-          "10.0.48.0/20",             # amsterdam internal
-          "130.117.76.0/27",          # amsterdam external
-          "2001:978:2:2C::172:0/112", # amsterdam external
-          "10.0.64.0/20",             # dublin internal
-          "184.104.226.96/27",        # dublin external
-          "2001:470:1:b3b::/64",      # dublin external
-          "10.0.32.0/20",             # bytemark internal
-          "89.16.162.16/28",          # bytemark external
-          "2001:41c9:2:d6::/64",      # bytemark external
-          "127.0.0.0/8",              # localhost
-          "::1"                       # localhost
-        ]
+  :nginx => {
+    :cache => {
+      :proxy => {
+          :enable => true,
+          :keys_zone => "proxy_cache_zone:256M",
+          :inactive => "180d",
+          :max_size => "51200M"
       }
     }
   }
@@ -119,11 +81,6 @@ default_attributes(
 run_list(
   "role[equinix-ams]",
   "role[gateway]",
-  "role[supybot]",
-  "role[backup]",
-  "role[planet]",
-  "role[planetdump]",
   "recipe[rsyncd]",
-  "recipe[dhcpd]",
-  "recipe[tilelog]"
+  "recipe[dhcpd]"
 )

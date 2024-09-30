@@ -17,15 +17,8 @@
 # limitations under the License.
 #
 
-node.default[:incron][:planetdump] = {
-  :user => "root",
-  :path => "/store/backup",
-  :events => %w[IN_CREATE IN_MOVED_TO],
-  :command => "/bin/systemctl start planetdump@$#"
-}
-
+include_recipe "accounts"
 include_recipe "git"
-include_recipe "incron"
 
 package %w[
   gcc
@@ -45,11 +38,10 @@ package %w[
   libprotobuf-dev
   osmpbf-bin
   pbzip2
-  php-cli
-  php-curl
   mktorrent
   xmlstarlet
   libxml2-utils
+  inotify-tools
 ]
 
 directory "/opt/planet-dump-ng" do
@@ -61,7 +53,7 @@ end
 git "/opt/planet-dump-ng" do
   action :sync
   repository "https://github.com/zerebubuth/planet-dump-ng.git"
-  revision "v1.2.3"
+  revision "v1.2.7"
   depth 1
   user "root"
   group "root"
@@ -95,13 +87,13 @@ execute "/opt/planet-dump-ng/Makefile" do
 end
 
 directory "/store/planetdump" do
-  owner "www-data"
-  group "www-data"
+  owner "planet"
+  group "planet"
   mode "755"
   recursive true
 end
 
-%w[planetdump planet-mirror-redirect-update].each do |program|
+%w[planetdump planetdump-trigger].each do |program|
   template "/usr/local/bin/#{program}" do
     source "#{program}.erb"
     owner "root"
@@ -112,18 +104,30 @@ end
 
 systemd_service "planetdump@" do
   description "Planet dump for %i"
-  user "www-data"
+  user "planet"
   exec_start "/usr/local/bin/planetdump %i"
   memory_max "64G"
-  private_tmp true
-  protect_system "full"
-  protect_home true
-  read_write_paths "/var/log/exim4"
+  sandbox :enable_network => true
+  protect_home "tmpfs"
+  bind_paths "/home/planet"
+  read_write_paths [
+    "/store/planetdump",
+    "/store/planet/pbf",
+    "/store/planet/planet",
+    "/var/log/exim4",
+    "/var/spool/exim4"
+  ]
 end
 
-cron_d "planet-dump-mirror" do
-  minute "*/10"
-  user "www-data"
-  command "/usr/local/bin/planet-mirror-redirect-update"
-  mailto "horntail-www-data-cron@firefishy.com"
+systemd_service "planetdump-trigger" do
+  description "Planet dump trigger"
+  user "root"
+  exec_start "/usr/local/bin/planetdump-trigger"
+  sandbox true
+  restrict_address_families "AF_UNIX"
+end
+
+service "planetdump-trigger" do
+  action [:enable, :start]
+  subscribes :restart, "template[/usr/local/bin/planetdump-trigger]"
 end

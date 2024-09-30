@@ -24,12 +24,16 @@ default_action :create
 
 property :site, :kind_of => String, :name_property => true
 property :aliases, :kind_of => [String, Array]
+property :title, :kind_of => String
+property :admin_user, :kind_of => String, :default => "osm_admin"
+property :admin_email, :kind_of => String, :default => "admins@openstreetmap.org"
 property :directory, :kind_of => String
 property :version, :kind_of => String
 property :database_name, :kind_of => String, :required => true
 property :database_user, :kind_of => String, :required => [:create]
 property :database_password, :kind_of => String, :required => [:create]
 property :database_prefix, :kind_of => String, :default => "wp_"
+property :wp2fa_encrypt_key, :kind_of => String, :required => true
 property :urls, :kind_of => Hash, :default => {}
 property :fpm_max_children, :kind_of => Integer, :default => 10
 property :fpm_start_servers, :kind_of => Integer, :default => 4
@@ -92,14 +96,22 @@ action :create do
     line.gsub!(/('LOGGED_IN_SALT', *)'put your unique phrase here'/, "\\1'#{logged_in_salt}'")
     line.gsub!(/('NONCE_SALT', *)'put your unique phrase here'/, "\\1'#{nonce_salt}'")
 
-    if line =~ /define\('WP_DEBUG'/
-      line += "\n"
-      line += "/**\n"
-      line += " * Don't allow file editing.\n"
-      line += " */\n"
-      line += "define('DISALLOW_FILE_EDIT', true);\n"
-      line += "define('FORCE_SSL_LOGIN', true);\n"
-      line += "define('FORCE_SSL_ADMIN', true);\n"
+    if line =~ /Add any custom values between this line/
+      line += "\r\n"
+      line += "/**\r\n"
+      line += " * Don't allow file editing.\r\n"
+      line += " */\r\n"
+      line += "define( 'WP_HOME', 'https://#{new_resource.site}');\r\n"
+      line += "define( 'WP_SITEURL', 'https://#{new_resource.site}');\r\n"
+      line += "define( 'DISALLOW_FILE_EDIT', true);\r\n"
+      line += "define( 'DISALLOW_FILE_MODS', true);\r\n"
+      line += "define( 'AUTOMATIC_UPDATER_DISABLED', true);\r\n"
+      line += "define( 'FORCE_SSL_LOGIN', true);\r\n"
+      line += "define( 'FORCE_SSL_ADMIN', true);\r\n"
+      line += "define( 'WP_FAIL2BAN_SITE_HEALTH_SKIP_FILTERS', true);\r\n"
+      line += "define( 'WP_ENVIRONMENT_TYPE', 'production');\r\n"
+      line += "define( 'WP_MEMORY_LIMIT', '128M');\r\n"
+      line += "define( 'WP2FA_ENCRYPT_KEY', '#{new_resource.wp2fa_encrypt_key}');\r\n"
     end
 
     line
@@ -134,6 +146,23 @@ action :create do
     backup false
   end
 
+  # Setup wordpress database and create admin user with random password
+  execute "wp core install" do
+    command "/opt/wp-cli/wp --path='#{site_directory}' core install --url='#{new_resource.site}' --title='#{new_resource.title}' --admin_user='#{new_resource.admin_user}' --admin_email='#{new_resource.admin_email}' --skip-email"
+    user "www-data"
+    group "www-data"
+    only_if { ::File.exist?("#{site_directory}/wp-config.php") }
+    not_if "/opt/wp-cli/wp  --path='#{site_directory}' core is-installed"
+  end
+
+  execute "wp core update-db" do
+    command "/opt/wp-cli/wp --path='#{site_directory}' core update-db"
+    user "www-data"
+    group "www-data"
+    only_if { ::File.exist?("#{site_directory}/wp-config.php") }
+    subscribes :run, "subversion[#{site_directory}]"
+  end
+
   ssl_certificate new_resource.site do
     domains [new_resource.site] + Array(new_resource.aliases)
   end
@@ -147,7 +176,8 @@ action :create do
     php_admin_values "open_basedir" => "#{site_directory}/:/usr/share/php/:/tmp/",
                      "disable_functions" => "exec,shell_exec,system,passthru,popen,proc_open"
     php_values "upload_max_filesize" => "70M",
-               "post_max_size" => "100M"
+               "post_max_size" => "100M",
+               "memory_limit" => "368M"
     prometheus_port new_resource.fpm_prometheus_port
   end
 
@@ -160,35 +190,35 @@ action :create do
     reload_apache false
   end
 
-  http_request "https://#{new_resource.site}/wp-admin/upgrade.php" do
-    action :nothing
-    url "https://#{new_resource.site}/wp-admin/upgrade.php?step=1"
-    subscribes :get, "subversion[#{site_directory}]"
-  end
-
   wordpress_plugin "wp-fail2ban" do
     site new_resource.site
     reload_apache false
   end
 
-  script "#{site_directory}/wp-content/plugins/wp-fail2ban" do
-    action :nothing
-    interpreter "php"
-    cwd site_directory
-    user "wordpress"
-    code <<-WP_FAIL2BAN
-    <?php
-    @include "wp-config.php";
-    @include_once "wp-includes/functions.php";
-    @include_once "wp-admin/includes/plugin.php";
-    activate_plugin("wp-fail2ban/wp-fail2ban.php", '', false, false);
-    ?>
-    WP_FAIL2BAN
-    subscribes :run, "wordpress_plugin[wp-fail2ban]"
+  wordpress_plugin "wp-2fa" do
+    site new_resource.site
+    reload_apache false
+  end
+
+  wordpress_plugin "wp-last-login" do
+    site new_resource.site
+    reload_apache false
   end
 end
 
 action :delete do
+  wordpress_plugin "wp-last-login" do
+    action :delete
+    site new_resource.site
+    reload_apache false
+  end
+
+  wordpress_plugin "wp-2fa" do
+    action :delete
+    site new_resource.site
+    reload_apache false
+  end
+
   wordpress_plugin "wp-fail2ban" do
     action :delete
     site new_resource.site
@@ -215,8 +245,8 @@ action :delete do
 end
 
 action_class do
-  include Chef::Mixin::EditFile
-  include Chef::Mixin::PersistentToken
+  include OpenStreetMap::Mixin::EditFile
+  include OpenStreetMap::Mixin::PersistentToken
 
   def site_directory
     new_resource.directory || "/srv/#{new_resource.site}"

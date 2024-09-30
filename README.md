@@ -14,16 +14,16 @@ servers.
 
 We make extensive use of roles to configure the servers. In general we have:
 
-## Server-specific roles (e.g. [katla.rb](roles/katla.rb))
+## Server-specific roles (e.g. [faffy.rb](roles/faffy.rb))
 
 These deal with particular setup or quirks of a server, such as its IP address. They also include roles representing the service they are performing, and the location they are in and any particular hardware they have that needs configuration.
 All our servers are [named after dragons](https://wiki.openstreetmap.org/wiki/Servers/Name_Ideas).
 
-## Hardware-specific roles (e.g. [tyan-s7010.rb](roles/tyan-s7010.rb))
+## Hardware-specific roles (e.g. [hp-g9.rb](roles/hp-g9.rb))
 
 Covers anything specific to a certain piece of hardware, like a motherboard, that could apply to multiple machines.
 
-## Location-specific roles (e.g. [equinix.rb](roles/equinix.rb))
+## Location-specific roles (e.g. [equinix-dub.rb](roles/equinix-dub.rb))
 
 These form a hierarchy of datacentres, organisations, and countries where our servers are located.
 
@@ -37,9 +37,10 @@ We use the 'Organization Repository' approach, where we have all our cookbooks i
 
 # Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more details. The guide also includes details on how to run the tests locally.
 
 # Contact Us
 
 * Twitter: [@OSM_Tech](https://twitter.com/OSM_Tech)
+* Mastodon / Fediverse: [@OSM_Tech](https://en.osm.town/@osm_tech)
 * IRC: [#OSM-Dev on irc.oftc.net](https://irc.openstreetmap.org/)

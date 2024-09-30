@@ -17,13 +17,19 @@
 # limitations under the License.
 #
 
-include_recipe "munin"
 include_recipe "prometheus"
 
 package %w[
   fail2ban
+  python3-systemd
   ruby-webrick
 ]
+
+if platform?("debian")
+  package "python3-inotify"
+else
+  package "gamin"
+end
 
 template "/etc/fail2ban/jail.d/00-default.conf" do
   source "jail.default.erb"
@@ -45,8 +51,8 @@ service "fail2ban" do
   action [:enable, :start]
 end
 
-munin_plugin "fail2ban"
-
 prometheus_exporter "fail2ban" do
   port 9635
+  user "root"
+  restrict_address_families "AF_UNIX"
 end

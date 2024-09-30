@@ -55,22 +55,24 @@ property :oauth_key, String
 property :oauth_application, String
 property :nominatim_url, String
 property :overpass_url, String
+property :overpass_credentials, [true, false], :default => false
 property :google_auth_id, String
 property :google_auth_secret, String
 property :google_openid_realm, String
 property :facebook_auth_id, String
 property :facebook_auth_secret, String
-property :windowslive_auth_id, String
-property :windowslive_auth_secret, String
+property :microsoft_auth_id, String
+property :microsoft_auth_secret, String
 property :github_auth_id, String
 property :github_auth_secret, String
 property :wikipedia_auth_id, String
 property :wikipedia_auth_secret, String
 property :thunderforest_key, String
+property :tracestrack_key, String
 property :totp_key, String
 property :csp_enforce, [true, false], :default => false
 property :csp_report_url, String
-property :piwik_configuration, Hash
+property :matomo_configuration, Hash
 property :storage_service, String, :default => "local"
 property :storage_url, String
 property :trace_use_job_queue, [true, false], :default => false
@@ -84,10 +86,18 @@ property :avatar_storage_url, String
 property :trace_image_storage_url, String
 property :trace_icon_storage_url, String
 property :tile_cdn_url, String
+property :imagery_blacklist, Array
+property :signup_ip_per_day, Integer
+property :signup_ip_max_burst, Integer
+property :signup_email_per_day, Integer
+property :signup_email_max_burst, Integer
+property :doorkeeper_signing_key, String
+property :user_account_deletion_delay, Integer
 
 action :create do
   package %W[
     imagemagick
+    libvips42
     nodejs
     tzdata
   ]
@@ -105,6 +115,7 @@ action :create do
     libgd-dev
     libarchive-dev
     libbz2-dev
+    libyaml-dev
   ]
 
   package %w[
@@ -238,9 +249,9 @@ action :create do
       line.gsub!(/^( *)#facebook_auth_secret:.*$/, "\\1facebook_auth_secret: \"#{new_resource.facebook_auth_secret}\"")
     end
 
-    if new_resource.windowslive_auth_id
-      line.gsub!(/^( *)#windowslive_auth_id:.*$/, "\\1windowslive_auth_id: \"#{new_resource.windowslive_auth_id}\"")
-      line.gsub!(/^( *)#windowslive_auth_secret:.*$/, "\\1windowslive_auth_secret: \"#{new_resource.windowslive_auth_secret}\"")
+    if new_resource.microsoft_auth_id
+      line.gsub!(/^( *)#microsoft_auth_id:.*$/, "\\1microsoft_auth_id: \"#{new_resource.microsoft_auth_id}\"")
+      line.gsub!(/^( *)#microsoft_auth_secret:.*$/, "\\1microsoft_auth_secret: \"#{new_resource.microsoft_auth_secret}\"")
     end
 
     if new_resource.github_auth_id
@@ -305,18 +316,20 @@ action :create do
     "oauth_application",
     "nominatim_url",
     "overpass_url",
+    "overpass_credentials",
     "google_auth_id",
     "google_auth_secret",
     "google_openid_realm",
     "facebook_auth_id",
     "facebook_auth_secret",
-    "windowslive_auth_id",
-    "windowslive_auth_secret",
+    "microsoft_auth_id",
+    "microsoft_auth_secret",
     "github_auth_id",
     "github_auth_secret",
     "wikipedia_auth_id",
     "wikipedia_auth_secret",
     "thunderforest_key",
+    "tracestrack_key",
     "totp_key",
     "csp_enforce",
     "csp_report_url",
@@ -331,18 +344,29 @@ action :create do
     "avatar_storage_url",
     "trace_image_storage_url",
     "trace_icon_storage_url",
-    "tile_cdn_url"
+    "tile_cdn_url",
+    "imagery_blacklist",
+    "signup_ip_per_day",
+    "signup_ip_max_burst",
+    "signup_email_per_day",
+    "signup_email_max_burst",
+    "doorkeeper_signing_key",
+    "user_account_deletion_delay"
   ).compact.merge(
     "server_protocol" => "https",
     "server_url" => new_resource.site,
     "support_email" => "support@openstreetmap.org",
     "email_return_path" => "bounces@openstreetmap.org",
     "geonames_username" => "openstreetmap",
-    "maxmind_database" => "/usr/share/GeoIP/GeoLite2-Country.mmdb",
+    "maxmind_database" => "#{node[:geoipupdate][:directory]}/GeoLite2-Country.mmdb",
     "max_request_area" => node[:web][:max_request_area],
     "max_number_of_nodes" => node[:web][:max_number_of_nodes],
     "max_number_of_way_nodes" => node[:web][:max_number_of_way_nodes],
-    "max_number_of_relation_members" => node[:web][:max_number_of_relation_members]
+    "max_number_of_relation_members" => node[:web][:max_number_of_relation_members],
+    "oauth_10_support" => false,
+    "oauth_10_registration" => false,
+    "oauth_10a_support" => false,
+    "basic_auth_support" => false
   )
 
   if new_resource.memcache_servers
@@ -352,6 +376,10 @@ action :create do
   if new_resource.gpx_dir
     settings["gpx_trace_dir"] = "#{new_resource.gpx_dir}/traces"
     settings["gpx_image_dir"] = "#{new_resource.gpx_dir}/images"
+  end
+
+  if new_resource.matomo_configuration
+    settings["matomo"] = new_resource.matomo_configuration.to_h
   end
 
   file "#{rails_directory}/config/settings.local.yml" do
@@ -376,17 +404,8 @@ action :create do
     content YAML.dump(storage_configuration)
   end
 
-  if new_resource.piwik_configuration
-    file "#{rails_directory}/config/piwik.yml" do
-      owner new_resource.user
-      group new_resource.group
-      mode "664"
-      content YAML.dump(new_resource.piwik_configuration)
-    end
-  else
-    file "#{rails_directory}/config/piwik.yml" do
-      action :delete
-    end
+  file "#{rails_directory}/config/piwik.yml" do
+    action :delete
   end
 
   bundle_install "#{rails_directory}" do
@@ -407,16 +426,13 @@ action :create do
     only_if { new_resource.run_migrations }
   end
 
-  package "yarnpkg" do
-    only_if { new_resource.build_assets }
-  end
-
   bundle_exec "#{rails_directory}/package.json" do
     action :nothing
     directory rails_directory
     command "rails yarn:install"
     environment "HOME" => rails_directory,
-                "RAILS_ENV" => "production"
+                "RAILS_ENV" => "production",
+                "SECRET_KEY_BASE_DUMMY" => "1"
     user new_resource.user
     group new_resource.group
     subscribes :run, "git[#{rails_directory}]"
@@ -428,7 +444,8 @@ action :create do
     directory rails_directory
     command "rails i18n:js:export"
     environment "HOME" => rails_directory,
-                "RAILS_ENV" => "production"
+                "RAILS_ENV" => "production",
+                "SECRET_KEY_BASE_DUMMY" => "1"
     user new_resource.user
     group new_resource.group
     subscribes :run, "git[#{rails_directory}]"
@@ -440,14 +457,14 @@ action :create do
     directory rails_directory
     command "rails assets:precompile"
     environment "HOME" => rails_directory,
-                "RAILS_ENV" => "production"
+                "RAILS_ENV" => "production",
+                "SECRET_KEY_BASE_DUMMY" => "1"
     user new_resource.user
     group new_resource.group
     subscribes :run, "git[#{rails_directory}]"
     subscribes :run, "file[create:#{rails_directory}/config/application.yml]"
     subscribes :run, "file[#{rails_directory}/config/settings.local.yml]"
     subscribes :run, "file[#{rails_directory}/config/storage.yml]"
-    subscribes :run, "file[#{rails_directory}/config/piwik.yml]"
     subscribes :run, "bundle_exec[#{rails_directory}/package.json]"
     subscribes :run, "bundle_exec[#{rails_directory}/app/assets/javascripts/i18n]"
     only_if { new_resource.build_assets }
@@ -466,7 +483,6 @@ action :create do
     subscribes :restart, "file[create:#{rails_directory}/config/application.yml]"
     subscribes :restart, "file[#{rails_directory}/config/settings.local.yml]"
     subscribes :restart, "file[#{rails_directory}/config/storage.yml]"
-    subscribes :restart, "file[#{rails_directory}/config/piwik.yml]"
     subscribes :restart, "bundle_installl[#{rails_directory}]"
     subscribes :restart, "bundle_exec[#{rails_directory}/db/migrate]"
     subscribes :restart, "bundle_exec[#{rails_directory}/package.json]"
@@ -492,7 +508,7 @@ action :restart do
 end
 
 action_class do
-  include Chef::Mixin::EditFile
+  include OpenStreetMap::Mixin::EditFile
 
   def rails_directory
     new_resource.directory || "/srv/#{new_resource.site}"

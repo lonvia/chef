@@ -8,6 +8,10 @@ module OpenStreetMap
       :select, :insert, :update, :delete, :truncate, :references, :trigger
     ].freeze
 
+    SEQUENCE_PRIVILEGES = [
+      :usage, :select, :update
+    ].freeze
+
     def initialize(cluster)
       @cluster = cluster
     end
@@ -72,12 +76,13 @@ module OpenStreetMap
     end
 
     def users
-      @users ||= query("SELECT * FROM pg_user").each_with_object({}) do |user, users|
+      @users ||= query("SELECT *, ARRAY(SELECT groname FROM pg_group WHERE usesysid = ANY(grolist)) AS roles FROM pg_user").each_with_object({}) do |user, users|
         users[user[:usename]] = {
           :superuser => user[:usesuper] == "t",
           :createdb => user[:usercreatedb] == "t",
           :createrole => user[:usecatupd] == "t",
-          :replication => user[:userepl] == "t"
+          :replication => user[:userepl] == "t",
+          :roles => parse_array(user[:roles] || "{}")
         }
       end
     end
@@ -112,7 +117,7 @@ module OpenStreetMap
 
     def tables(database)
       @tables ||= {}
-      @tables[database] ||= query("SELECT n.nspname, c.relname, u.usename, c.relacl FROM pg_class AS c INNER JOIN pg_user AS u ON c.relowner = u.usesysid INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid", :database => database).each_with_object({}) do |table, tables|
+      @tables[database] ||= query("SELECT n.nspname, c.relname, u.usename, c.relacl FROM pg_class AS c INNER JOIN pg_user AS u ON c.relowner = u.usesysid INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND c.relkind = 'r'", :database => database).each_with_object({}) do |table, tables|
         name = "#{table[:nspname]}.#{table[:relname]}"
 
         tables[name] = {
@@ -122,10 +127,26 @@ module OpenStreetMap
       end
     end
 
+    def sequences(database)
+      @sequences ||= {}
+      @sequences[database] ||= query("SELECT n.nspname, c.relname, u.usename, c.relacl FROM pg_class AS c INNER JOIN pg_user AS u ON c.relowner = u.usesysid INNER JOIN pg_namespace AS n ON c.relnamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND c.relkind = 'S'", :database => database).each_with_object({}) do |sequence, sequences|
+        name = "#{sequence[:nspname]}.#{sequence[:relname]}"
+
+        sequences[name] = {
+          :owner => sequence[:usename],
+          :permissions => parse_acl(sequence[:relacl] || "{}")
+        }
+      end
+    end
+
     private
 
+    def parse_array(array)
+      array.sub(/^\{(.*)\}$/, "\\1").split(",")
+    end
+
     def parse_acl(acl)
-      acl.sub(/^\{(.*)\}$/, "\\1").split(",").each_with_object({}) do |entry, permissions|
+      parse_array(acl).each_with_object({}) do |entry, permissions|
         entry = entry.sub(/^"(.*)"$/) { Regexp.last_match[1].gsub(/\\"/, '"') }.sub(%r{/.*$}, "")
         user, privileges = entry.split("=")
 
@@ -133,8 +154,10 @@ module OpenStreetMap
         user = "public" if user == ""
 
         permissions[user] = {
-          "a" => :insert, "r" => :select, "w" => :update, "d" => :delete,
-          "D" => :truncate, "x" => :references, "t" => :trigger
+          "r" => :select, "a" => :insert, "w" => :update, "d" => :delete,
+          "D" => :truncate, "x" => :references, "t" => :trigger,
+          "C" => :create, "c" => :connect, "T" => :temporary,
+          "X" => :execute, "U" => :usage, "s" => :set, "A" => :alter_system
         }.values_at(*privileges.chars).compact
       end
     end

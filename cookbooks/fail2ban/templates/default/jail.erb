@@ -11,8 +11,20 @@ port = <%= @ports.join(",") %>
 <% if @filter -%>
 filter = <%= @filter %>
 <% end -%>
+<% if @backend -%>
+backend = <%= @backend %>
+<% end -%>
+<% if @journalmatch -%>
+journalmatch = <%= @journalmatch %>
+<% end -%>
 <% if @logpath -%>
 logpath = <%= @logpath %>
+<% end -%>
+<% if @bantime -%>
+bantime = <%= @bantime %>
+<% end -%>
+<% if @findtime -%>
+findtime = <%= @findtime %>
 <% end -%>
 <% if @maxretry -%>
 maxretry = <%= @maxretry %>

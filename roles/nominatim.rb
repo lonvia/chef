@@ -21,7 +21,6 @@ default_attributes(
       :defaults => {
         :max_connections => "450",
         :synchronous_commit => "off",
-        :checkpoint_segments => "32",
         :checkpoint_timeout => "10min",
         :checkpoint_completion_target => "0.9",
         :jit => "off",
@@ -29,8 +28,11 @@ default_attributes(
         :autovacuum_max_workers => "1",
         :max_parallel_workers_per_gather => "0",
         :maintenance_work_mem => "10GB",
-        :random_page_cost => "1.5",
-        :effective_cache_size => "60GB"
+        :seq_page_cost => "3.0",
+        :random_page_cost => "3.0",
+        :effective_cache_size => "60GB",
+        :wal_level => "minimal",
+        :max_wal_senders => "0"
       }
     }
   },
@@ -40,13 +42,6 @@ default_attributes(
       :parameters => {
         "kernel.shmmax" => 26 * 1024 * 1024 * 1024,
         "kernel.shmall" => 26 * 1024 * 1024 * 1024 / 4096
-      }
-    },
-    :kernel_scheduler_tune => {
-      :comment => "Tune kernel scheduler preempt",
-      :parameters => {
-        "kernel.sched_min_granularity_ns" => 10000000,
-        "kernel.sched_wakeup_granularity_ns" => 15000000
       }
     },
     :swappiness => {

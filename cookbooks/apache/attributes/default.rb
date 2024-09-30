@@ -30,4 +30,11 @@ default[:apache][:listen_address] = "*"
 
 default[:apache][:buffered_logs] = true
 
-default[:apache][:reqtimeout] = false
+default[:apache][:evasive][:enable] = true
+default[:apache][:evasive][:hash_table_size] = 65536
+# page_count is misnomer as it can match backends in some cases
+default[:apache][:evasive][:page_count] = 150
+default[:apache][:evasive][:site_count] = 250
+default[:apache][:evasive][:page_interval] = 1
+default[:apache][:evasive][:site_interval] = 1
+default[:apache][:evasive][:blocking_period] = 60

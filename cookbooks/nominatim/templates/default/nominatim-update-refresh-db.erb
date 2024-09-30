@@ -1,0 +1,12 @@
+#!/bin/bash -e
+
+# DO NOT EDIT - This file is being maintained by Chef
+
+date "+%c === Refresh database after software updates"
+
+cd <%= @projectdir %>
+
+# Run the migrations from the nominatim version in the build directory,
+# so they can execute while the frontend doesn't have the new code yet.
+<%= @builddir %>/nominatim admin --migrate
+<%= @builddir %>/nominatim refresh --functions --address-levels --website

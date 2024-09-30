@@ -27,6 +27,7 @@ package %W[
   gcc
   g++
   libsqlite3-dev
+  sqlite3
 ]
 
 directory "/srv/blogs.openstreetmap.org" do
@@ -41,22 +42,24 @@ git "/srv/blogs.openstreetmap.org" do
   depth 1
   user "blogs"
   group "blogs"
-  notifies :run, "bundle_install[/srv/blogs.openstreetmap.org]", :immediately
 end
 
 bundle_install "/srv/blogs.openstreetmap.org" do
   action :nothing
-  options "--deployment"
+  options "--deployment --without development test"
+  environment "BUNDLE_PATH" => "vendor/bundle"
   user "blogs"
   group "blogs"
-  notifies :run, "bundle_exec[/srv/blogs.openstreetmap.org]", :immediately
+  subscribes :run, "git[/srv/blogs.openstreetmap.org]", :immediately
 end
 
 bundle_exec "/srv/blogs.openstreetmap.org" do
   action :nothing
   command "pluto build -t osm -o build"
+  environment "BUNDLE_PATH" => "vendor/bundle"
   user "blogs"
   group "blogs"
+  subscribes :run, "git[/srv/blogs.openstreetmap.org]", :immediately
 end
 
 ssl_certificate "blogs.openstreetmap.org" do
@@ -77,9 +80,27 @@ template "/usr/local/bin/blogs-update" do
   mode "0755"
 end
 
-cron_d "blogs" do
-  minute "*/30"
+systemd_service "blogs-update" do
+  description "Update blog aggregator"
+  exec_start "/usr/local/bin/blogs-update"
   user "blogs"
-  command "/usr/local/bin/blogs-update"
-  mailto "admins@openstreetmap.org"
+  sandbox :enable_network => true
+  read_write_paths "/srv/blogs.openstreetmap.org"
+end
+
+systemd_timer "blogs-update" do
+  description "Update blog aggregator"
+  on_boot_sec "15m"
+  on_unit_inactive_sec "30m"
+end
+
+service "blogs-update.timer" do
+  action [:enable, :start]
+end
+
+template "/etc/cron.daily/blogs-backup" do
+  source "backup.cron.erb"
+  owner "root"
+  group "root"
+  mode "0755"
 end

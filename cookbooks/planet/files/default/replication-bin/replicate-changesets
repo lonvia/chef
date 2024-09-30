@@ -128,10 +128,7 @@ end
 # to guarantee sync for newly created directories.
 def fdirsync(d)
   while d != "/"
-    Dir.open(d) do |dh|
-      io = IO.for_fd(dh.fileno)
-      io.fsync
-    end
+    fsync(d)
     d = File.dirname(d)
   end
 end
@@ -207,6 +204,10 @@ class Replicator
     @config["data_dir"] + format("/%03d/%03d/%03d", sequence / 1000000, (sequence / 1000) % 1000, (sequence % 1000))
   end
 
+  def s3_stem
+    @config["s3_dir"] + format("/%03d/%03d/%03d", sequence / 1000000, (sequence / 1000) % 1000, (sequence % 1000))
+  end
+
   def write_tmp_files!(changesets)
     data_file = data_stem + ".osm.gz"
     tmp_state = @config["state_file"] + ".tmp"
@@ -216,9 +217,7 @@ class Replicator
     Zlib::GzipWriter.open(tmp_data) do |fh|
       fh.write(changeset_dump(changesets))
     end
-    File.open(tmp_state, "w") do |fh|
-      fh.write(YAML.dump(@state))
-    end
+    File.write(tmp_state, YAML.dump(@state))
 
     # fsync the files in their old locations.
     fsync(tmp_data)
@@ -257,6 +256,16 @@ class Replicator
     # from the dirent and has been updated to account for any allocations.
     fdirsync(File.dirname(data_file))
     fdirsync(File.dirname(@config["state_file"]))
+
+    if @config["s3_dir"]
+      s3_file = s3_stem + ".osm.gz"
+      s3_state_file = s3_stem + ".state.txt"
+      s3_state_config_file = @config["s3_dir"] + "/state.yaml"
+
+      system("/opt/awscli/v2/current/bin/aws", "--profile=osm-pds-upload", "s3", "cp", "--storage-class=INTELLIGENT_TIERING", "--no-progress", data_file, s3_file)
+      system("/opt/awscli/v2/current/bin/aws", "--profile=osm-pds-upload", "s3", "cp", "--storage-class=INTELLIGENT_TIERING", "--no-progress", data_state_file, s3_state_file)
+      system("/opt/awscli/v2/current/bin/aws", "--profile=osm-pds-upload", "s3", "cp", "--storage-class=INTELLIGENT_TIERING", "--no-progress", @config["state_file"], s3_state_config_file)
+    end
   end
 
   # saves new state (including the changeset dump xml)
@@ -267,7 +276,7 @@ class Replicator
       # of processes queueing on the lock and causing weirdness if/when they
       # get woken up in a random order.
       got_lock = fl.flock(File::LOCK_EX | File::LOCK_NB)
-      return unless got_lock
+      break unless got_lock
 
       # try and write the files to tmp locations and then
       # move them into place later, to avoid in-progress
@@ -296,5 +305,8 @@ begin
   rep.save!
 rescue StandardError => e
   warn "ERROR: #{e.message}"
+  e.backtrace.each do |frame|
+    warn "ERROR: #{frame}"
+  end
   exit 1
 end

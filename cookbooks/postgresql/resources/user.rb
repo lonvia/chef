@@ -30,6 +30,7 @@ property :superuser, :kind_of => [TrueClass, FalseClass], :default => false
 property :createdb, :kind_of => [TrueClass, FalseClass], :default => false
 property :createrole, :kind_of => [TrueClass, FalseClass], :default => false
 property :replication, :kind_of => [TrueClass, FalseClass], :default => false
+property :roles, :kind_of => [String, Array]
 
 action :create do
   password = new_resource.password ? "ENCRYPTED PASSWORD '#{new_resource.password.shellescape}'" : ""
@@ -41,6 +42,12 @@ action :create do
   if !cluster.users.include?(new_resource.user)
     converge_by "create role #{new_resource.user}" do
       cluster.execute(:command => "CREATE ROLE \"#{new_resource.user}\" LOGIN #{password} #{superuser} #{createdb} #{createrole}")
+    end
+
+    Array(new_resource.roles).each do |role|
+      converge_by "grant #{role} to #{new_resource.user}" do
+        cluster.execute(:command => "GRANT \"#{role}\" TO \"#{new_resource.user}\"")
+      end
     end
   else
     current_user = cluster.users[new_resource.user]
@@ -68,6 +75,24 @@ action :create do
         converge_by "alter role #{new_resource.user}" do
           cluster.execute(:command => "ALTER ROLE \"#{new_resource.user}\" #{replication}")
         end
+      end
+    end
+
+    roles = Array(new_resource.roles)
+
+    roles.each do |role|
+      next if current_user[:roles].include?(role)
+
+      converge_by "grant #{role} to #{new_resource.user}" do
+        cluster.execute(:command => "GRANT \"#{role}\" TO \"#{new_resource.user}\"")
+      end
+    end
+
+    current_user[:roles].each do |role|
+      next if roles.include?(role)
+
+      converge_by "revoke #{role} from #{new_resource.user}" do
+        cluster.execute(:command => "REVOKE \"#{role}\" FROM \"#{new_resource.user}\"")
       end
     end
   end

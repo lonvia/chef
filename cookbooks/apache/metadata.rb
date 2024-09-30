@@ -6,6 +6,7 @@ description       "Installs and configures apache"
 
 version           "1.0.0"
 supports          "ubuntu"
-depends           "munin"
+depends           "fail2ban"
 depends           "prometheus"
 depends           "ssl"
+depends           "systemd"

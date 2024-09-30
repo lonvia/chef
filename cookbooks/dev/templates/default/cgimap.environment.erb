@@ -1,6 +1,6 @@
 # DO NOT EDIT - This file is being maintained by Chef
 
-CGIMAP_PORT="<%= @cgimap_port %>"
+CGIMAP_SOCKET="<%= @cgimap_socket %>"
 CGIMAP_DBPORT="<%= @database_port %>"
 CGIMAP_DBNAME="<%= @database_name %>"
 CGIMAP_USERNAME="apis"
@@ -12,3 +12,8 @@ CGIMAP_MAP_AREA="<%= node[:web][:max_request_area] %>"
 CGIMAP_MAP_NODES"<%= node[:web][:max_number_of_nodes] %>"
 CGIMAP_MAX_WAY_NODES="<%= node[:web][:max_number_of_way_nodes] %>"
 CGIMAP_MAX_RELATION_MEMBERS="<%= node[:web][:max_number_of_relation_members] %>"
+CGIMAP_RATELIMIT_UPLOAD="true"
+CGIMAP_BBOX_SIZE_LIMIT_UPLOAD="true"
+<% Hash(@options).each do |name, value| -%>
+CGIMAP_<%= name.to_s.upcase %>="<%= value %>"
+<% end -%>

@@ -19,11 +19,12 @@
 
 include_recipe "accounts"
 include_recipe "apache"
-include_recipe "munin"
+include_recipe "geoipupdate"
+include_recipe "planet::aws"
 
 package %w[
-  perl
-  php-cli
+  python3
+  python3-geoip2
 ]
 
 remote_directory "/store/planet#html" do
@@ -50,7 +51,17 @@ end
 
 remote_directory node[:planet][:dump][:xml_history_directory] do
   source "history_cgi"
-  owner "www-data"
+  owner "planet"
+  group "planet"
+  mode "775"
+  files_owner "root"
+  files_group "root"
+  files_mode "755"
+end
+
+remote_directory "/store/planet/cc-by-sa" do
+  source "ccbysa_cgi"
+  owner "planet"
   group "planet"
   mode "775"
   files_owner "root"
@@ -60,7 +71,7 @@ end
 
 remote_directory "/store/planet/cc-by-sa/full-experimental" do
   source "ccbysa_history_cgi"
-  owner "www-data"
+  owner "planet"
   group "planet"
   mode "775"
   files_owner "root"
@@ -71,26 +82,34 @@ end
 [:xml_directory, :xml_history_directory,
  :pbf_directory, :pbf_history_directory].each do |dir|
   directory node[:planet][:dump][dir] do
-    owner "www-data"
+    owner "planet"
     group "planet"
     mode "775"
   end
 end
 
 directory "/store/planet/notes" do
-  owner "www-data"
+  owner "planet"
   group "planet"
   mode "775"
 end
 
 directory "/store/planet/statistics" do
-  owner "www-data"
+  owner "planet"
   group "planet"
   mode "775"
 end
 
 template "/usr/local/bin/apache-latest-planet-filename" do
   source "apache-latest-planet-filename.erb"
+  owner "root"
+  group "root"
+  mode "755"
+  notifies :restart, "service[apache2]"
+end
+
+template "/usr/local/bin/apache-s3-ip2region" do
+  source "apache-s3-ip2region.erb"
   owner "root"
   group "root"
   mode "755"
@@ -118,21 +137,29 @@ template "/etc/logrotate.d/apache2" do
   mode "644"
 end
 
-munin_plugin "planet_age"
-
-template "/usr/local/bin/old-planet-file-cleanup" do
-  source "old-planet-file-cleanup.erb"
+template "/usr/local/bin/planet-file-cleanup" do
+  source "planet-file-cleanup.erb"
   owner "root"
   group "root"
   mode "755"
 end
 
-cron_d "old-planet-file-cleanup" do
-  comment "run this on the first monday of the month at 3:44am"
-  minute "44"
-  hour "3"
-  day "1-7"
-  user "www-data"
-  command "test $(date +\\%u) -eq 1 && /usr/local/bin/old-planet-file-cleanup --debug"
-  mailto "zerebubuth@gmail.com"
+systemd_service "planet-file-cleanup" do
+  description "Cleanup old planet files"
+  exec_start "/usr/local/bin/planet-file-cleanup --debug"
+  user "planet"
+  sandbox true
+  read_write_paths [
+    node[:planet][:dump][:xml_directory],
+    node[:planet][:dump][:pbf_directory]
+  ]
+end
+
+systemd_timer "planet-file-cleanup" do
+  description "Cleanup old planet files"
+  on_calendar "Mon *-*-1..7 03:44"
+end
+
+service "planet-file-cleanup.timer" do
+  action [:enable, :start]
 end

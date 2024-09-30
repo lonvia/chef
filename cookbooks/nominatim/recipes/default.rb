@@ -18,9 +18,11 @@
 #
 
 include_recipe "accounts"
-include_recipe "munin"
-include_recipe "php::fpm"
 include_recipe "prometheus"
+
+if node[:nominatim][:api_flavour] == "php"
+  include_recipe "php::fpm"
+end
 
 basedir = data_bag_item("accounts", "nominatim")["home"]
 email_errors = data_bag_item("accounts", "lonvia")["email"]
@@ -31,6 +33,8 @@ directory basedir do
   mode "755"
   recursive true
 end
+
+## Log directory setup
 
 directory node[:nominatim][:logdir] do
   owner "nominatim"
@@ -81,11 +85,6 @@ postgresql_user "www-data" do
   only_if { node[:nominatim][:state] != "slave" }
 end
 
-postgresql_munin "nominatim" do
-  cluster node[:nominatim][:dbcluster]
-  database node[:nominatim][:dbname]
-end
-
 directory "#{basedir}/tablespaces" do
   owner "postgres"
   group "postgres"
@@ -113,33 +112,12 @@ node[:nominatim][:tablespaces].each do |name, location|
   end
 end
 
-if node[:nominatim][:state] == "master"
-  postgresql_user "replication" do
-    cluster node[:nominatim][:dbcluster]
-    password data_bag_item("nominatim", "passwords")["replication"]
-    replication true
-  end
-
-  directory node[:rsyncd][:modules][:archive][:path] do
-    owner "postgres"
-    group "postgres"
-    mode "700"
-  end
-
-  template "/usr/local/bin/clean-db-nominatim" do
-    source "clean-db-nominatim.erb"
-    owner "root"
-    group "root"
-    mode "755"
-    variables :archive_dir => node[:rsyncd][:modules][:archive][:path],
-              :update_stop_file => "#{basedir}/status/updates_disabled",
-              :streaming_clients => search(:node, "nominatim_state:slave").map { |slave| slave[:fqdn] }.join(" ")
-  end
-end
-
 ## Nominatim backend
 
 include_recipe "git"
+include_recipe "python"
+
+python_directory = "#{basedir}/venv"
 
 package %w[
   build-essential
@@ -150,38 +128,154 @@ package %w[
   libboost-filesystem-dev
   libexpat1-dev
   zlib1g-dev
-  libxml2-dev
   libbz2-dev
   libpq-dev
-  libgeos++-dev
   libproj-dev
+  liblua5.3-dev
+  libluajit-5.1-dev
+  libicu-dev
+  nlohmann-json3-dev
+  lua5.3
   python3-pyosmium
-  pyosmium
   python3-psycopg2
   python3-dotenv
   python3-psutil
   python3-jinja2
   python3-icu
   python3-datrie
-  php-pgsql
-  php-intl
-  php-symfony-dotenv
+  python3-yaml
+  python3-sqlalchemy-ext
+  python3-geoalchemy2
+  python3-asyncpg
+  python3-dev
+  pkg-config
   ruby
   ruby-file-tail
   ruby-pg
+  ruby-webrick
 ]
 
-source_directory = "#{basedir}/nominatim"
-build_directory = "#{basedir}/bin"
+if node[:nominatim][:api_flavour] == "php"
+  package %w[
+    php-pgsql
+    php-intl
+  ]
+elsif node[:nominatim][:api_flavour] == "python"
+
+  python_virtualenv python_directory do
+    interpreter "/usr/bin/python3"
+  end
+
+  python_package "SQLAlchemy" do
+    python_virtualenv python_directory
+    version "2.0.32"
+  end
+
+  python_package "PyICU" do
+    python_virtualenv python_directory
+    version "2.13.1"
+  end
+
+  python_package "psycopg[binary]" do
+    python_virtualenv python_directory
+    version "3.2.1"
+  end
+
+  python_package "psycopg2-binary" do
+    python_virtualenv python_directory
+    version "2.9.9"
+  end
+
+  python_package "python-dotenv" do
+    python_virtualenv python_directory
+    version "1.0.1"
+  end
+
+  python_package "pygments" do
+    python_virtualenv python_directory
+    version "2.18.0"
+  end
+
+  python_package "PyYAML" do
+    python_virtualenv python_directory
+    version "6.0.2"
+  end
+
+  python_package "falcon" do
+    python_virtualenv python_directory
+    version "3.1.3"
+  end
+
+  python_package "uvicorn" do
+    python_virtualenv python_directory
+    version "0.30.5"
+  end
+
+  python_package "gunicorn" do
+    python_virtualenv python_directory
+    version "22.0.0"
+  end
+
+  python_package "jinja2" do
+    python_virtualenv python_directory
+    version "3.1.4"
+  end
+
+  python_package "datrie" do
+    python_virtualenv python_directory
+    version "0.8.2"
+  end
+
+  python_package "psutil" do
+    python_virtualenv python_directory
+    version "6.0.0"
+  end
+
+  python_package "osmium" do
+    python_virtualenv python_directory
+    version "3.7.0"
+  end
+end
+
+source_directory = "#{basedir}/src/nominatim"
+build_directory = "#{basedir}/src/build"
+project_directory = "#{basedir}/planet-project"
+bin_directory = "#{basedir}/bin"
+cfg_directory = "#{basedir}/etc"
 ui_directory = "#{basedir}/ui"
-qa_bin_directory = "#{basedir}/Nominatim-Data-Analyser"
+qa_bin_directory = "#{basedir}/src/Nominatim-Data-Analyser"
 qa_data_directory = "#{basedir}/qa-data"
 
-directory build_directory do
+[basedir, "#{basedir}/src", cfg_directory, bin_directory, build_directory, project_directory].each do |path|
+  directory path do
+    owner "nominatim"
+    group "nominatim"
+    mode "755"
+    recursive true
+  end
+end
+
+directory "#{bin_directory}/maintenance" do
+  owner "nominatim"
+  group "nominatim"
+  mode "775"
+end
+
+if node[:nominatim][:flatnode_file]
+  directory File.dirname(node[:nominatim][:flatnode_file]) do
+    recursive true
+  end
+end
+
+remote_directory "#{project_directory}/static-website" do
+  source "website"
   owner "nominatim"
   group "nominatim"
   mode "755"
-  recursive true
+  files_owner "nominatim"
+  files_group "nominatim"
+  files_mode "644"
+  purge false
 end
 
 # Normally syncing via chef is a bad idea because syncing might involve
@@ -202,7 +296,7 @@ end
 
 remote_file "#{source_directory}/data/country_osm_grid.sql.gz" do
   action :create_if_missing
-  source "https://www.nominatim.org/data/country_grid.sql.gz"
+  source "https://nominatim.org/data/country_grid.sql.gz"
   owner "nominatim"
   group "nominatim"
   mode "644"
@@ -213,23 +307,18 @@ execute "compile_nominatim" do
   user "nominatim"
   cwd build_directory
   command "cmake #{source_directory} && make"
+  notifies :run, "execute[install_nominatim]"
 end
 
-link "/usr/local/bin/nominatim" do
-  to "#{build_directory}/nominatim"
+execute "install_nominatim" do
+  action :nothing
+  cwd build_directory
+  command "make install"
 end
 
-template "#{source_directory}/.git/hooks/post-merge" do
-  source "git-post-merge-hook.erb"
-  owner "nominatim"
-  group "nominatim"
-  mode "755"
-  variables :srcdir => source_directory,
-            :builddir => build_directory,
-            :dbname => node[:nominatim][:dbname]
-end
+# Project directory
 
-template "#{build_directory}/.env" do
+template "#{project_directory}/.env" do
   source "nominatim.env.erb"
   owner "nominatim"
   group "nominatim"
@@ -238,157 +327,43 @@ template "#{build_directory}/.env" do
             :dbname => node[:nominatim][:dbname],
             :flatnode_file => node[:nominatim][:flatnode_file],
             :log_file => "#{node[:nominatim][:logdir]}/query.log",
-            :tokenizer => node[:nominatim][:config][:tokenizer]
+            :tokenizer => node[:nominatim][:config][:tokenizer],
+            :forward_dependencies => node[:nominatim][:config][:forward_dependencies],
+            :pool_size => node[:nominatim][:api_pool_size],
+            :query_timeout => node[:nominatim][:api_query_timeout],
+            :request_timeout => node[:nominatim][:api_request_timeout]
 end
 
-git ui_directory do
-  action :sync
-  repository node[:nominatim][:ui_repository]
-  revision node[:nominatim][:ui_revision]
-  user "nominatim"
-  group "nominatim"
-end
-
-template "#{ui_directory}/dist/theme/config.theme.js" do
-  source "ui-config.js.erb"
+remote_file "#{project_directory}/secondary_importance.sql.gz" do
+  action :create_if_missing
+  source "https://nominatim.org/data/wikimedia-secondary-importance.sql.gz"
   owner "nominatim"
   group "nominatim"
-  mode "664"
-end
-
-if node[:nominatim][:flatnode_file]
-  directory File.dirname(node[:nominatim][:flatnode_file]) do
-    recursive true
-  end
-end
-
-template "/etc/logrotate.d/nominatim" do
-  source "logrotate.nominatim.erb"
-  owner "root"
-  group "root"
   mode "644"
 end
 
-external_data = [
-  "wikimedia-importance.sql.gz",
-  "gb_postcodes.csv.gz",
-  "us_postcodes.csv.gz"
-]
+remote_file "#{project_directory}/wikimedia-importance.sql.gz" do
+  action :create_if_missing
+  source "https://nominatim.org/data/wikimedia-importance.sql.gz"
+  owner "nominatim"
+  group "nominatim"
+  mode "644"
+end
 
-external_data.each do |fname|
-  remote_file "#{build_directory}/#{fname}" do
+%w[gb_postcodes.csv.gz us_postcodes.csv.gz].each do |fname|
+  remote_file "#{project_directory}/#{fname}" do
     action :create
-    source "https://www.nominatim.org/data/#{fname}"
+    source "https://nominatim.org/data/#{fname}"
     owner "nominatim"
     group "nominatim"
     mode "644"
   end
 end
 
-if node[:nominatim][:state] == "off"
-  cron_d "nominatim-backup" do
-    action :delete
-  end
-
-  cron_d "nominatim-vacuum-db" do
-    action :delete
-  end
-
-  cron_d "nominatim-clean-db" do
-    action :delete
-  end
-
-  systemd_timer "nominatim-update-maintenance-trigger" do
-    action :delete
-  end
-else
-  cron_d "nominatim-backup" do
-    action node[:nominatim][:enable_backup] ? :create : :delete
-    minute "0"
-    hour "3"
-    day "1"
-    user "nominatim"
-    command "/usr/local/bin/backup-nominatim"
-    mailto email_errors
-  end
-
-  cron_d "nominatim-vacuum-db" do
-    minute "20"
-    hour "0"
-    user "postgres"
-    command "/usr/local/bin/vacuum-db-nominatim"
-    mailto email_errors
-  end
-
-  cron_d "nominatim-clean-db" do
-    action node[:nominatim][:state] == "master" ? :create : :delete
-    minute "5"
-    hour "*/4"
-    user "postgres"
-    command "/usr/local/bin/clean-db-nominatim"
-    mailto email_errors
-  end
-
-  systemd_service "nominatim-update-maintenance-trigger" do
-    description "Trigger maintenance tasks for Nominatim DB"
-    exec_start "touch #{basedir}/status/update_maintenance"
-    user "nominatim"
-  end
-
-  systemd_timer "nominatim-update-maintenance-trigger" do
-    action :create
-    description "Schedule maintenance tasks for Nominatim DB"
-    on_calendar "*-*-* 02:03:00 UTC"
-  end
-
-  service "nominatim-update-maintenance-trigger" do
-    action [:enable]
-  end
-end
-
-template "#{source_directory}/utils/nominatim-update" do
-  source "updater.erb"
-  user "nominatim"
-  group "nominatim"
-  mode "755"
-  variables :bindir => build_directory,
-            :srcdir => source_directory,
-            :logfile => "#{node[:nominatim][:logdir]}/update.log",
-            :branch => node[:nominatim][:revision],
-            :update_stop_file => "#{basedir}/status/updates_disabled",
-            :update_maintenance_trigger => "#{basedir}/status/update_maintenance",
-            :qabindir => qa_bin_directory,
-            :qadatadir => qa_data_directory
-end
-
-template "/etc/init.d/nominatim-update" do
-  source "updater.init.erb"
-  user "nominatim"
-  group "nominatim"
-  mode "755"
-  variables :source_directory => source_directory
-end
-
-%w[backup-nominatim vacuum-db-nominatim].each do |fname|
-  template "/usr/local/bin/#{fname}" do
-    source "#{fname}.erb"
-    owner "root"
-    group "root"
-    mode "755"
-    variables :db => node[:nominatim][:dbname]
-  end
-end
-
-## webserver frontend
-
-directory "#{basedir}/etc" do
-  owner "nominatim"
-  group "adm"
-  mode "775"
-end
+# Webserver + frontend
 
 %w[user_agent referrer email generic].each do |name|
-  file "#{basedir}/etc/nginx_blocked_#{name}.conf" do
+  file "#{cfg_directory}/nginx_blocked_#{name}.conf" do
     action :create_if_missing
     owner "nominatim"
     group "adm"
@@ -396,16 +371,41 @@ end
   end
 end
 
-node[:nominatim][:fpm_pools].each do |name, data|
-  php_fpm name do
-    port data[:port]
-    pm data[:pm]
-    pm_max_children data[:max_children]
-    pm_start_servers 20
-    pm_min_spare_servers 10
-    pm_max_spare_servers 20
-    pm_max_requests 10000
-    prometheus_port data[:prometheus_port]
+if node[:nominatim][:api_flavour] == "php"
+  node[:nominatim][:fpm_pools].each do |name, data|
+    php_fpm name do
+      port data[:port]
+      pm data[:pm]
+      pm_max_children data[:max_children]
+      pm_start_servers 20
+      pm_min_spare_servers 10
+      pm_max_spare_servers 20
+      pm_max_requests 10000
+      prometheus_port data[:prometheus_port]
+    end
+  end
+elsif node[:nominatim][:api_flavour] == "python"
+  systemd_service "nominatim" do
+    description "Nominatim running as a gunicorn application"
+    user "www-data"
+    group "www-data"
+    working_directory project_directory
+    standard_output "append:#{node[:nominatim][:logdir]}/gunicorn.log"
+    standard_error "inherit"
+    exec_start "#{python_directory}/bin/gunicorn --max-requests 200000 -b unix:/run/gunicorn-nominatim.openstreetmap.org.sock -w #{node[:nominatim][:api_workers]} -k uvicorn.workers.UvicornWorker nominatim_api.server.falcon.server:run_wsgi"
+    exec_reload "/bin/kill -s HUP $MAINPID"
+    environment :PYTHONPATH => "/usr/local/lib/nominatim/lib-python/"
+    kill_mode "mixed"
+    timeout_stop_sec 5
+    private_tmp true
+    requires "nominatim.socket"
+    after "network.target"
+  end
+
+  systemd_socket "nominatim" do
+    description "Gunicorn socket for Nominatim"
+    listen_stream "/run/gunicorn-nominatim.openstreetmap.org.sock"
+    socket_user "www-data"
   end
 end
 
@@ -431,7 +431,7 @@ frontends = search(:node, "recipes:web\\:\\:frontend").sort_by(&:name)
 
 nginx_site "nominatim" do
   template "nginx.erb"
-  directory build_directory
+  directory project_directory
   variables :pools => node[:nominatim][:fpm_pools],
             :frontends => frontends,
             :confdir => "#{basedir}/etc",
@@ -445,54 +445,70 @@ template "/etc/logrotate.d/nginx" do
   mode "644"
 end
 
-munin_plugin_conf "nominatim" do
-  template "munin.erb"
-  variables :db => node[:nominatim][:dbname],
-            :querylog => "#{node[:nominatim][:logdir]}/query.log"
+# Updates
+
+%w[nominatim-update
+   nominatim-update-source
+   nominatim-update-refresh-db
+   nominatim-update-data
+   nominatim-daily-maintenance].each do |fname|
+  template "#{bin_directory}/#{fname}" do
+    source "#{fname}.erb"
+    owner "nominatim"
+    group "nominatim"
+    mode "554"
+    variables :bindir => bin_directory,
+              :srcdir => source_directory,
+              :builddir => build_directory,
+              :projectdir => project_directory,
+              :qabindir => qa_bin_directory,
+              :qadatadir => qa_data_directory
+  end
 end
 
-munin_plugin "nominatim_importlag" do
-  target "#{source_directory}/munin/nominatim_importlag"
+systemd_service "nominatim-update" do
+  description "Update the Nominatim database"
+  exec_start "#{bin_directory}/nominatim-update"
+  restart "on-success"
+  standard_output "append:#{node[:nominatim][:logdir]}/update.log"
+  standard_error "inherit"
+  working_directory project_directory
 end
 
-munin_plugin "nominatim_query_speed" do
-  target "#{source_directory}/munin/nominatim_query_speed_querylog"
+systemd_service "nominatim-update-maintenance-trigger" do
+  description "Trigger daily maintenance tasks for Nominatim DB"
+  exec_start "ln -sf #{bin_directory}/nominatim-daily-maintenance #{bin_directory}/maintenance/"
+  user "nominatim"
 end
 
-munin_plugin "nominatim_requests" do
-  target "#{source_directory}/munin/nominatim_requests_querylog"
+systemd_timer "nominatim-update-maintenance-trigger" do
+  action node[:nominatim][:state] != "off" ? :create : :delete
+  description "Schedule daily maintenance tasks for Nominatim DB"
+  on_calendar "*-*-* 02:03:00 UTC"
 end
 
-package "ruby-webrick"
-
-prometheus_exporter "nominatim" do
-  port 8082
-  user "www-data"
-  options [
-    "--nominatim.query-log=#{node[:nominatim][:logdir]}/query.log",
-    "--nominatim.database-name=#{node[:nominatim][:dbname]}"
-  ]
+service "nominatim-update-maintenance-trigger" do
+  action node[:nominatim][:state] != "off" ? :enable : :disable
 end
 
-directory "#{basedir}/status" do
+# Nominatim UI
+
+git ui_directory do
+  action :sync
+  repository node[:nominatim][:ui_repository]
+  revision node[:nominatim][:ui_revision]
+  user "nominatim"
+  group "nominatim"
+end
+
+template "#{ui_directory}/dist/theme/config.theme.js" do
+  source "ui-config.js.erb"
   owner "nominatim"
-  group "postgres"
-  mode "775"
+  group "nominatim"
+  mode "664"
 end
 
-include_recipe "fail2ban"
-
-frontend_addresses = frontends.collect { |f| f.ipaddresses(:role => :external) }
-
-fail2ban_jail "nominatim_limit_req" do
-  filter "nginx-limit-req"
-  logpath "#{node[:nominatim][:logdir]}/nominatim.openstreetmap.org-error.log"
-  ports [80, 443]
-  maxretry 20
-  ignoreips frontend_addresses.flatten.sort
-end
-
-### QA tile generation
+# Nominatim QA
 
 if node[:nominatim][:enable_qa_tiles]
   package "python3-geojson"
@@ -539,4 +555,102 @@ if node[:nominatim][:enable_qa_tiles]
     variables :qa_data_directory => qa_data_directory
   end
 
+end
+
+# Replication
+
+cron_d "nominatim-clean-db" do
+  action node[:nominatim][:state] == "master" ? :create : :delete
+  minute "5"
+  hour "*/4"
+  user "postgres"
+  command "#{bin_directory}/clean-db-nominatim"
+  mailto email_errors
+end
+
+if node[:nominatim][:state] == "master"
+  postgresql_user "replication" do
+    cluster node[:nominatim][:dbcluster]
+    password data_bag_item("nominatim", "passwords")["replication"]
+    replication true
+  end
+
+  directory node[:rsyncd][:modules][:archive][:path] do
+    owner "postgres"
+    group "postgres"
+    mode "700"
+  end
+
+  template "#{bin_directory}/clean-db-nominatim" do
+    source "clean-db-nominatim.erb"
+    owner "nominatim"
+    group "nominatim"
+    mode "755"
+    variables :archive_dir => node[:rsyncd][:modules][:archive][:path],
+              :update_stop_file => "#{basedir}/status/updates_disabled",
+              :streaming_clients => search(:node, "nominatim_state:slave").map { |slave| slave[:fqdn] }.join(" ")
+  end
+end
+
+# Maintenance
+
+cron_d "nominatim-backup" do
+  action (node[:nominatim][:enable_backup] && node[:nominatim][:state] != "off") ? :create : :delete
+  minute "0"
+  hour "3"
+  day "1"
+  user "nominatim"
+  command "#{bin_directory}/backup-nominatim"
+  mailto email_errors
+end
+
+cron_d "nominatim-vacuum-db" do
+  action node[:nominatim][:state] != "off" ? :create : :delete
+  minute "20"
+  hour "0"
+  user "postgres"
+  command "#{bin_directory}/vacuum-db-nominatim"
+  mailto email_errors
+end
+
+%w[backup-nominatim vacuum-db-nominatim].each do |fname|
+  template "#{bin_directory}/#{fname}" do
+    source "#{fname}.erb"
+    owner "nominatim"
+    group "nominatim"
+    mode "755"
+    variables :db => node[:nominatim][:dbname]
+  end
+end
+
+# Logging
+
+template "/etc/logrotate.d/nominatim" do
+  source "logrotate.nominatim.erb"
+  owner "root"
+  group "root"
+  mode "644"
+end
+
+# Monitoring
+prometheus_exporter "nominatim" do
+  port 8082
+  user "www-data"
+  restrict_address_families "AF_UNIX"
+  options [
+    "--nominatim.query-log=#{node[:nominatim][:logdir]}/query.log",
+    "--nominatim.database-name=#{node[:nominatim][:dbname]}"
+  ]
+end
+
+include_recipe "fail2ban"
+
+frontend_addresses = frontends.collect { |f| f.ipaddresses(:role => :external) }
+
+fail2ban_jail "nominatim_limit_req" do
+  filter "nginx-limit-req"
+  logpath "#{node[:nominatim][:logdir]}/nominatim.openstreetmap.org-error.log"
+  ports [80, 443]
+  maxretry 20
+  ignoreips frontend_addresses.flatten.sort
 end

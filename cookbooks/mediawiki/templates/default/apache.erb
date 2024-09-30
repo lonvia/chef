@@ -8,7 +8,7 @@
 
   ServerAdmin webmaster@openstreetmap.org
 
-  CustomLog /var/log/apache2/<%= @name %>-access.log combined
+  CustomLog /var/log/apache2/<%= @name %>-access.log combined_extended
   ErrorLog /var/log/apache2/<%= @name %>-error.log
 
   RedirectPermanent /.well-known/acme-challenge/ http://acme.openstreetmap.org/.well-known/acme-challenge/
@@ -27,19 +27,19 @@
   SSLCertificateFile /etc/ssl/certs/<%= @name %>.pem
   SSLCertificateKeyFile /etc/ssl/private/<%= @name %>.key
 
-  CustomLog /var/log/apache2/<%= @name %>-secure-access.log combined
-  ErrorLog /var/log/apache2/<%= @name %>-secure-error.log
+  CustomLog /var/log/apache2/<%= @name %>-access.log combined_extended
+  ErrorLog /var/log/apache2/<%= @name %>-error.log
 
   DocumentRoot <%= @directory %>
+
+  AllowEncodedSlashes NoDecode
 
   ProxyTimeout 300
 
   RewriteCond %{SERVER_NAME} !=<%= @name %>
   RewriteRule ^/(.*)$ https://<%= @name %>/$1 [R=permanent]
 
-  RedirectMatch 301 ^/$                           /wiki/Main_Page
-
-  #Historical Compatibility Links
+  # Historical Compatibility Links
   RedirectMatch 301 ^/index\.php$                 /w/index.php
   RedirectMatch 301 ^/index\.php/(.*)$            /wiki/$1
   RedirectMatch 301 ^/skins/(.*)$                 /w/skins/$1
@@ -47,7 +47,7 @@
   RedirectMatch 301 ^/api\.php$                   /w/api.php
   RedirectMatch 301 ^/opensearch_desc\.php$       /w/opensearch_desc.php
 
-  #Support Wikidata redirects based on Wikimedia's redirects:
+  # Support Wikidata redirects based on Wikimedia's redirects:
   # https://github.com/wikimedia/puppet/blob/production/modules/mediawiki/files/apache/sites/wikidata-uris.incl
   RedirectMatch 301 ^/entity/statement/([QqPp]\d+).*$        /wiki/Special:EntityData/$1
   RedirectMatch 301 ^/value/(.*)$                            /wiki/Special:ListDatatypes
@@ -69,8 +69,9 @@
 
   Alias /wiki <%= @directory %>/w/index.php
 
-  #Support /pagename -> /wiki/pagename
+  # Support /pagename -> /wiki/pagename
   RewriteEngine on
+  RewriteRule ^/$ /w/index.php?title=Main_Page [L,QSA]
   RewriteCond %{REQUEST_URI} !^/w/
   RewriteCond %{REQUEST_URI} !^/wiki/
   RewriteCond %{REQUEST_URI} !^/index\.php
@@ -81,9 +82,10 @@
   RewriteCond %{REQUEST_URI} !^/entity/
   RewriteCond %{REQUEST_URI} !^/value/
   RewriteCond %{REQUEST_URI} !^/reference/
-  RewriteCond %{REQUEST_URI} !^/prop/  
-  RewriteCond %{REQUEST_URI} !^/dump/  
+  RewriteCond %{REQUEST_URI} !^/prop/
+  RewriteCond %{REQUEST_URI} !^/dump/
   RewriteCond %{REQUEST_URI} !^/server-status
+  RewriteCond %{REQUEST_URI} !^/server-info
   RewriteCond %{REQUEST_URI} !^/.well-known/
   RewriteCond %{LA-U:REQUEST_FILENAME} !-f
   RewriteCond %{LA-U:REQUEST_FILENAME} !-d
@@ -94,7 +96,7 @@
     Require all granted
 
     <FilesMatch ".+\.ph(ar|p|tml)$">
-      SetHandler "proxy:unix:/run/php/<%= @name %>.sock|fcgi://127.0.0.1"
+      SetHandler "proxy:unix:/run/php/php-<%= @name %>-fpm.sock|fcgi://127.0.0.1"
     </FilesMatch>
   </Directory>
 

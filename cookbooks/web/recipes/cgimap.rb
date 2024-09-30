@@ -24,6 +24,10 @@ include_recipe "web::base"
 db_passwords = data_bag_item("db", "passwords")
 
 package "openstreetmap-cgimap-bin" do
+  action :purge
+end
+
+package "openstreetmap-cgimap" do
   action :install
 end
 
@@ -32,21 +36,25 @@ database_host = node[:web][:readonly_database_host] || node[:web][:database_host
 memcached_servers = node[:web][:memcached_servers] || []
 
 cgimap_options = {
+  "CGIMAP_SOCKET" => "/run/cgimap/socket",
   "CGIMAP_HOST" => database_host,
   "CGIMAP_DBNAME" => "openstreetmap",
   "CGIMAP_USERNAME" => "cgimap",
   "CGIMAP_PASSWORD" => db_passwords["cgimap"],
-  "CGIMAP_OAUTH_HOST" => node[:web][:database_host],
   "CGIMAP_UPDATE_HOST" => node[:web][:database_host],
   "CGIMAP_PIDFILE" => "#{node[:web][:pid_directory]}/cgimap.pid",
   "CGIMAP_LOGFILE" => "#{node[:web][:log_directory]}/cgimap.log",
   "CGIMAP_MEMCACHE" => memcached_servers.join(","),
   "CGIMAP_RATELIMIT" => "204800",
   "CGIMAP_MAXDEBT" => "250",
+  "CGIMAP_MODERATOR_RATELIMIT" => "1048576",
+  "CGIMAP_MODERATOR_MAXDEBT" => "1280",
   "CGIMAP_MAP_AREA" => node[:web][:max_request_area],
   "CGIMAP_MAP_NODES" => node[:web][:max_number_of_nodes],
   "CGIMAP_MAX_WAY_NODES" => node[:web][:max_number_of_way_nodes],
-  "CGIMAP_MAX_RELATION_MEMBERS" => node[:web][:max_number_of_relation_members]
+  "CGIMAP_MAX_RELATION_MEMBERS" => node[:web][:max_number_of_relation_members],
+  "CGIMAP_RATELIMIT_UPLOAD" => "true",
+  "CGIMAP_BBOX_SIZE_LIMIT_UPLOAD" => "true"
 }
 
 if %w[database_readonly api_readonly].include?(node[:web][:status])
@@ -58,8 +66,11 @@ systemd_service "cgimap" do
   type "forking"
   environment_file cgimap_options
   user "rails"
-  exec_start "/usr/bin/openstreetmap-cgimap --daemon --port 8000 --instances 30"
+  group "www-data"
+  umask "0002"
+  exec_start "/usr/bin/openstreetmap-cgimap --daemon --instances 30"
   exec_reload "/bin/kill -HUP $MAINPID"
+  runtime_directory "cgimap"
   private_tmp true
   private_devices true
   protect_system "full"

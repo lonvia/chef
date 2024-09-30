@@ -17,6 +17,8 @@
 # limitations under the License.
 #
 
+include_recipe "accounts"
+include_recipe "planet::aws"
 include_recipe "python"
 
 passwords = data_bag_item("tilelog", "passwords")
@@ -31,12 +33,12 @@ end
 python_package "tilelog" do
   python_virtualenv tilelog_directory
   python_version "3"
-  version "1.2.0"
+  version "1.7.0"
 end
 
 directory tilelog_output_directory do
-  user "www-data"
-  group "www-data"
+  user "planet"
+  group "planet"
   mode "755"
   recursive true
 end
@@ -52,12 +54,12 @@ end
 
 systemd_service "tilelog" do
   description "Tile log analysis"
-  user "www-data"
+  user "planet"
   exec_start "/usr/local/bin/tilelog"
-  private_tmp true
-  private_devices true
-  protect_system "strict"
-  protect_home true
+  nice 10
+  sandbox :enable_network => true
+  protect_home "tmpfs"
+  bind_paths "/home/planet"
   read_write_paths tilelog_output_directory
 end
 

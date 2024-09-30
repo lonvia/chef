@@ -6,5 +6,19 @@ cd /etc/replication
 
 osmdbt-catchup --quiet
 osmdbt-get-log --quiet
+
+/opt/awscli/v2/current/bin/aws --profile=osm-osmdbt-state-upload s3 sync --storage-class=INTELLIGENT_TIERING --no-progress --exclude='*' --include='osm-repl-*.log' /var/lib/replication/minute s3://openstreetmap-osmdbt-state
+
 osmdbt-catchup --quiet
 osmdbt-create-diff --quiet --with-comment --max-changes=50000
+
+. /store/planet/replication/minute/state.txt
+
+sequencePart1=$(($sequenceNumber / 1000000 % 1000))
+sequencePart2=$(($sequenceNumber / 1000 % 1000))
+sequencePart3=$(($sequenceNumber % 1000))
+diffPath=$(printf "%03d/%03d/%03d" $sequencePart1 $sequencePart2 $sequencePart3)
+
+/opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "/store/planet/replication/minute/${diffPath}.osc.gz" "s3://osm-planet-eu-central-1/planet/replication/minute/${diffPath}.osc.gz"
+/opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "/store/planet/replication/minute/${diffPath}.state.txt" "s3://osm-planet-eu-central-1/planet/replication/minute/${diffPath}.state.txt"
+/opt/awscli/v2/current/bin/aws --profile=osm-pds-upload s3 cp --storage-class=INTELLIGENT_TIERING --no-progress "/store/planet/replication/minute/state.txt" "s3://osm-planet-eu-central-1/planet/replication/minute/state.txt"

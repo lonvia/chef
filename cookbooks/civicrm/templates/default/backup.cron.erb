@@ -11,11 +11,11 @@ echo '[mysqldump]' > $T/mysqldump.opts
 echo 'user=civicrm' >> $T/mysqldump.opts
 echo 'password=<%= @passwords["database"] %>' >> $T/mysqldump.opts
 mysqldump --defaults-file=$T/mysqldump.opts --opt --skip-lock-tables --no-tablespaces civicrm > $T/osmf-crm-$D/civicrm.sql
-ln -s /srv/join.osmfoundation.org $T/osmf-crm-$D/www
+ln -s /srv/supporting.openstreetmap.org $T/osmf-crm-$D/www
 
 export RSYNC_RSH="ssh -ax"
 
 nice tar --create --dereference --directory=$T osmf-crm-$D | nice gzip --rsyncable -9 > $T/$B
-nice rsync --preallocate --fuzzy $T/$B backup::backup
+nice rsync --preallocate --fuzzy $T/$B backup.openstreetmap.org::backup
 
 rm -rf $T

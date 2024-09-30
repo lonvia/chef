@@ -3,41 +3,54 @@ name: Test Kitchen
 on:
   - push
   - pull_request
+  - workflow_dispatch
 
 concurrency:
-  group: ${{ github.workflow }}-{{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
   kitchen:
     name: Test Kitchen
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    permissions:
+      packages: read
     strategy:
       matrix:
         suite:
           - accounts
           - apache
           - apt
+          - apt-repository
           - backup
           - bind
           - blog
           - blogs
+          - chef
           - civicrm
           - clamav
+          - community
           - db-backup
           - db-base
           - db-master
           - db-slave
+          - dev
           - devices
           - dhcpd
           - dmca
           - dns
           - docker
-          - donate
           - elasticsearch
           - exim
           - fail2ban
-          - forum
+          - foundation-birthday
+          - foundation-board
+          - foundation-dwg
+          - foundation-mastodon
+          - foundation-mwg
+          - foundation-owg
+          - foundation-welcome
+          - foundation-wiki
           - ftp
           - geodns
           - geoipupdate
@@ -47,7 +60,7 @@ jobs:
           - gps-tile
           - hardware
           - hot
-          - incron
+          - ideditor
           - irc
           - kibana
           - letsencrypt
@@ -55,10 +68,8 @@ jobs:
           - logstash-forwarder
           - mail
           - mailman
+          - matomo
           - memcached
-          - munin
-          - munin-plugins
-          - munin-server
           - mysql
           - networking
           - nginx
@@ -69,12 +80,13 @@ jobs:
           - osmosis
           - osqa
           - otrs
+          - overpass
           - passenger
           - php
           - php-apache
           - php-fpm
-          - piwik
           - planet
+          - planet-aws
           - planet-current
           - planet-dump
           - planet-notes
@@ -88,7 +100,8 @@ jobs:
           - snmpd
           - spamassassin
           - ssl
-          - stateofthemap
+          - stateofthemap-container
+          - stateofthemap-wordpress
           - subversion
           - supybot
           - switch2osm
@@ -105,14 +118,93 @@ jobs:
           - wordpress
           - wiki
         os:
-          - ubuntu-2004
+          - ubuntu-2204
+        include:
+          - os: ubuntu-2004
+            suite: mailman
+          - os: ubuntu-2004
+            suite: osqa
+          - os: debian-12
+            suite: apt-repository
+          - os: debian-12
+            suite: dev
+          - os: debian-12
+            suite: dns
+          - os: debian-12
+            suite: git-server
+          - os: debian-12
+            suite: git-web
+          - os: debian-12
+            suite: imagery-tiler
+          - os: debian-12
+            suite: letsencrypt
+          - os: debian-12
+            suite: otrs
+          - os: debian-12
+            suite: serverinfo
+          - os: debian-12
+            suite: supybot
+          - os: debian-12
+            suite: web-cgimap
+          - os: debian-12
+            suite: web-frontend
+          - os: debian-12
+            suite: web-rails
+        exclude:
+          - suite: apt-repository
+            os: ubuntu-2204
+          - suite: dev
+            os: ubuntu-2204
+          - suite: dns
+            os: ubuntu-2204
+          - suite: git-server
+            os: ubuntu-2204
+          - suite: git-web
+            os: ubuntu-2204
+          - suite: mailman
+            os: ubuntu-2204
+          - suite: letsencrypt
+            os: ubuntu-2204
+          - suite: osqa
+            os: ubuntu-2204
+          - suite: otrs
+            os: ubuntu-2204
+          - suite: serverinfo
+            os: ubuntu-2204
+          - suite: supybot
+            os: ubuntu-2204
+          - suite: web-cgimap
+            os: ubuntu-2204
+          - suite: web-frontend
+            os: ubuntu-2204
+          - suite: web-rails
+            os: ubuntu-2204
       fail-fast: false
     steps:
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      if: github.repository == 'openstreetmap/chef' && github.event_name != 'pull_request'
     - name: Check out code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Setup ruby
       uses: ruby/setup-ruby@v1
       with:
+        ruby-version: 3.1
         bundler-cache: true
     - name: Run kitchen test ${{ matrix.suite }}-${{ matrix.os }}
       run: bundle exec kitchen test ${{ matrix.suite }}-${{ matrix.os }}
+    - name: Gather journal output
+      run: |
+        bundle exec kitchen exec ${{ matrix.suite }}-${{ matrix.os }} -c "journalctl --since=yesterday"
+        bundle exec kitchen exec ${{ matrix.suite }}-${{ matrix.os }} -c "networkctl status --all"
+        bundle exec kitchen exec ${{ matrix.suite }}-${{ matrix.os }} -c "resolvectl status" || true
+      if: ${{ failure() }}

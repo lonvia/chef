@@ -7,7 +7,7 @@
 <% end -%>
         ServerAdmin webmaster@openstreetmap.org
 
-        CustomLog /var/log/apache2/<%= @name %>-access.log combined
+        CustomLog /var/log/apache2/<%= @name %>-access.log combined_extended
         ErrorLog /var/log/apache2/<%= @name %>-error.log
 
         RedirectPermanent /.well-known/acme-challenge/ http://acme.openstreetmap.org/.well-known/acme-challenge/
@@ -26,7 +26,7 @@
         SSLCertificateFile /etc/ssl/certs/<%= @name %>.pem
         SSLCertificateKeyFile /etc/ssl/private/<%= @name %>.key
 
-        CustomLog /var/log/apache2/<%= @name %>-access.log combined
+        CustomLog /var/log/apache2/<%= @name %>-access.log combined_extended
         ErrorLog /var/log/apache2/<%= @name %>-error.log
 
         RedirectPermanent / https://<%= @name %>/
@@ -41,7 +41,7 @@
         SSLCertificateFile /etc/ssl/certs/<%= @name %>.pem
         SSLCertificateKeyFile /etc/ssl/private/<%= @name %>.key
 
-        CustomLog /var/log/apache2/<%= @name %>-access.log combined
+        CustomLog /var/log/apache2/<%= @name %>-access.log combined_extended
         ErrorLog /var/log/apache2/<%= @name %>-error.log
 
         SetEnv GIT_PROJECT_ROOT /var/lib/git
@@ -53,13 +53,19 @@
         # KeepaliveTimeout longer than git config uploadpack.keepalive 5 second default
         KeepAliveTimeout 20
 
+        RewriteEngine on
+        RewriteRule ^/cgimap\.git.* https://github.com/zerebubuth/openstreetmap-cgimap [QSD,L,R=permanent]
+        RewriteRule ^/planetdump\.git.* https://github.com/openstreetmap/planetdump [QSD,L,R=permanent]
+        RewriteRule ^/gpx-import\.git.* https://github.com/openstreetmap/gpx-import [QSD,L,R=permanent]
+        RewriteRule ^/potlatch2\.git.* https://github.com/openstreetmap/potlatch2 [QSD,L,R=permanent]
+
         ScriptAlias /public /usr/lib/git-core/git-http-backend/public
         ScriptAlias /private /usr/lib/git-core/git-http-backend/private
         Alias /gitweb /usr/share/gitweb
         Alias /git /var/cache/git
         ScriptAlias / /usr/lib/cgi-bin/gitweb.cgi/
 
-        <Location />
+        <Location /public>
                   Require all granted
         </Location>
 <% unless @private_allowed.empty? -%>

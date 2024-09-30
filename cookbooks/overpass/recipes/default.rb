@@ -18,14 +18,15 @@
 #
 
 include_recipe "accounts"
-include_recipe "munin"
 include_recipe "apache"
+include_recipe "prometheus"
+include_recipe "ruby"
 
 username = "overpass"
 basedir = data_bag_item("accounts", username)["home"]
 web_passwords = data_bag_item("web", "passwords")
 
-%w[bin site diffs db src munin].each do |dirname|
+%w[bin site diffs db src].each do |dirname|
   directory "#{basedir}/#{dirname}" do
     owner username
     group username
@@ -48,7 +49,7 @@ package %w[
 ]
 
 remote_file "#{srcdir}.tar.gz" do
-  action :create
+  action :create_if_missing
   source "https://dev.overpass-api.de/releases/osm-3s_v#{node[:overpass][:version]}.tar.gz"
   owner username
   group username
@@ -68,11 +69,15 @@ execute "install_overpass" do
   user username
   cwd srcdir
   command "./configure --enable-lz4 --prefix=#{basedir} && make install"
+  notifies :restart, "service[overpass-dispatcher]"
+  notifies :restart, "service[overpass-area-dispatcher]"
 end
 
 ## Setup Apache
 
-gem_package "rotp"
+gem_package "rotp" do
+  gem_binary node[:ruby][:gem]
+end
 
 directory "#{basedir}/apache" do
   owner "root"
@@ -145,6 +150,7 @@ end
 
 systemd_service "overpass-dispatcher" do
   description "Overpass Main Dispatcher"
+  wants ["overpass-area-dispatcher.service"]
   working_directory basedir
   exec_start "#{basedir}/bin/dispatcher --osm-base #{meta_map_short[node[:overpass][:meta_mode]]} --db-dir=#{basedir}/db --rate-limit=#{node[:overpass][:rate_limit]} --space=#{node[:overpass][:dispatcher_space]}"
   exec_stop "#{basedir}/bin/dispatcher --osm-base --terminate"
@@ -158,7 +164,7 @@ end
 
 systemd_service "overpass-area-dispatcher" do
   description "Overpass Area Dispatcher"
-  after ["overpass-dispatcher"]
+  after ["overpass-dispatcher.service"]
   working_directory basedir
   exec_start "#{basedir}/bin/dispatcher --areas #{meta_map_short[node[:overpass][:meta_mode]]} --db-dir=#{basedir}/db"
   exec_stop "#{basedir}/bin/dispatcher --areas --terminate"
@@ -172,43 +178,46 @@ end
 
 systemd_service "overpass-update" do
   description "Overpass Update Application"
-  after ["overpass-dispatcher"]
+  after ["overpass-dispatcher.service"]
+  wants ["overpass-area-processor.service"]
   working_directory basedir
   exec_start "#{basedir}/bin/overpass-update-db"
   standard_output "append:#{logdir}/update.log"
   user username
+  restart "on-success"
 end
 
 if node[:overpass][:meta_mode] == "attic"
   systemd_service "overpass-area-processor" do
     description "Overpass Area Processor"
-    after ["overpass-area-dispatcher"]
+    after ["overpass-area-dispatcher.service", "overpass-update.service"]
     working_directory basedir
     exec_start "#{basedir}/bin/overpass-update-areas"
     standard_output "append:#{logdir}/area-processor.log"
+    restart "on-success"
     nice 19
     user username
   end
 else
   systemd_service "overpass-area-processor" do
     description "Overpass Area Processor"
-    after ["overpass-area-dispatcher"]
+    after ["overpass-area-dispatcher.service", "overpass-update.service"]
     working_directory basedir
     exec_start "#{basedir}/bin/osm3s_query --progress --rules"
     standard_input "file:#{srcdir}/rules/areas.osm3s"
     standard_output "append:#{logdir}/area-processor.log"
+    restart "on-success"
     nice 19
     user username
   end
 end
 
 systemd_timer "overpass-area-processor" do
-  description "Update areas in Overpass"
-  on_calendar "*-*-* *:*:00"
+  action :delete
 end
 
 service "overpass-area-processor" do
-  action [:enable]
+  action [:disable]
 end
 
 template "/etc/logrotate.d/overpass" do
@@ -219,20 +228,11 @@ template "/etc/logrotate.d/overpass" do
   variables :logdir => logdir
 end
 
-# Munin scripts
-
-%w[db_lag request_count].each do |name|
-  template "#{basedir}/munin/overpass_#{name}" do
-    source "munin_#{name}.erb"
-    owner username
-    group username
-    mode "755"
-    variables :basedir => basedir
-  end
-
-  munin_plugin "overpass_#{name}" do
-    target "#{basedir}/munin/overpass_#{name}"
-    conf "munin.erb"
-    conf_variables :user => username
-  end
+prometheus_exporter "overpass" do
+  port 9898
+  user username
+  restrict_address_families "AF_UNIX"
+  options [
+    "--overpass.base-directory=#{basedir}"
+  ]
 end

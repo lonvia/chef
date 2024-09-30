@@ -4,11 +4,12 @@ description "Master role applied to snap-03"
 default_attributes(
   :networking => {
     :interfaces => {
-      :internal_ipv4 => {
+      :internal => {
         :interface => "bond0",
         :role => :internal,
-        :family => :inet,
-        :address => "10.0.64.50",
+        :inet => {
+          :address => "10.0.64.50"
+        },
         :bond => {
           :mode => "802.3ad",
           :lacprate => "fast",
@@ -24,9 +25,7 @@ default_attributes(
         :shared_buffers => "128GB",
         :work_mem => "128MB",
         :maintenance_work_mem => "2GB",
-        :effective_cache_size => "360GB",
-        :effective_io_concurrency => "256",
-        :random_page_cost => "1.1"
+        :effective_cache_size => "360GB"
       }
     }
   },

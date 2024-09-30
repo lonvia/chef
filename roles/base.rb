@@ -10,17 +10,10 @@ default_attributes(
       :jburgess => { :status => :administrator }
     }
   },
-  :munin => {
-    :plugins => {
-      :chrony => {
-        :systime => { :warning => "100", :critical => "250" }
-      }
-    }
-  },
   :networking => {
     :roles => {
-      :internal => { :metric => 200, :zone => "loc" },
-      :external => { :metric => 100, :zone => "osm" }
+      :internal => { :metric => 200 },
+      :external => { :metric => 100 }
     },
     :search => ["openstreetmap.org"]
   },
@@ -74,10 +67,9 @@ default_attributes(
       }
     },
     :default_qdisc => {
-      :comment => "Use fq as the default queuing discipline and cubic for congestion control",
+      :comment => "Use fq as the default queuing discipline",
       :parameters => {
-        "net.core.default_qdisc" => "fq",
-        "net.ipv4.tcp_congestion_control" => "cubic"
+        "net.core.default_qdisc" => "fq"
       }
     },
     :tune_cpu_scheduler => {
@@ -96,7 +88,6 @@ run_list(
   "recipe[devices]",
   "recipe[hardware]",
   "recipe[prometheus]",
-  "recipe[munin::plugins]",
   "recipe[networking]",
   "recipe[exim]",
   "recipe[ntp]",

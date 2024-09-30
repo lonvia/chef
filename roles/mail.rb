@@ -29,28 +29,40 @@ default_attributes(
     :queue_run_max => 25,
     :smtp_accept_max => 200,
     :smarthost_name => "mail.openstreetmap.org",
-    :smarthost_via => false,
-    :dns_blacklists => ["zen.spamhaus.org"],
+    :smarthost_via => nil,
+    :dns_blacklists => ["zen.spamhaus.org!&0.255.255.0"],
     :routes => {
       :messages => {
         :comment => "messages.openstreetmap.org",
         :domains => ["messages.openstreetmap.org"],
-        :host => ["spike-06.openstreetmap.org", "spike-07.openstreetmap.org", "spike-08.openstreetmap.org"]
+        :host => [
+          "spike-01.openstreetmap.org",
+          "spike-02.openstreetmap.org",
+          "spike-03.openstreetmap.org",
+          "spike-06.openstreetmap.org",
+          "spike-07.openstreetmap.org",
+          "spike-08.openstreetmap.org"
+        ]
       },
       :otrs => {
         :comment => "otrs.openstreetmap.org",
         :domains => ["otrs.openstreetmap.org"],
-        :host => "ridley.ucl.openstreetmap.org"
+        :host => "naga.dub.openstreetmap.org"
       },
       :join => {
         :comment => "join.osmfoundation.org",
         :domains => ["join.osmfoundation.org"],
         :host => "ridley.ucl.openstreetmap.org"
       },
+      :supporting => {
+        :comment => "supporting.openstreetmap.org",
+        :domains => ["supporting.openstreetmap.org"],
+        :host => "ridley.ucl.openstreetmap.org"
+      },
       :community => {
         :comment => "community.openstreetmap.org",
         :domains => ["community.openstreetmap.org"],
-        :host => "jakelong.dub.openstreetmap.org::2500"
+        :host => "gorwen.dub.openstreetmap.org::2500"
       }
     },
     :dkim_selectors => {
@@ -64,7 +76,6 @@ default_attributes(
       "clamav" => "root",
       "rails" => "root",
       "trac" => "root",
-      "munin" => "root",
       "prometheus" => "root",
       "www-data" => "root",
       "osmbackup" => "root",
@@ -86,19 +97,9 @@ default_attributes(
     },
     :private_aliases => "mail"
   },
-  :munin => {
-    :plugins => {
-      :exim_mailqueue => {
-        :mails => {
-          :warning => 500,
-          :critical => 1000
-        }
-      }
-    }
-  },
   :prometheus => {
     :metrics => {
-      :exim_queue_limit => { :metric => 250 }
+      :exim_queue_limit => { :metric => 2500 }
     }
   }
 )

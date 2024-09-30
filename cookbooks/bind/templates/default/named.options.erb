@@ -1,43 +1,25 @@
 # DO NOT EDIT - This file is being maintained by Chef
 
-acl "osm" {
-	127.0.0.1/32;
-<% node.interfaces(:family => :inet).each do |interface| -%>
-        <%= interface[:network] %>/<%= interface[:prefix] %>;
-<% end -%>
-<% @ipv4_clients.sort.each do |address| -%>
-	<%= address %>/32;
-<% end -%>
-
-	::1/128;
-<% node.interfaces(:family => :inet6).each do |interface| -%>
-        <%= interface[:network] %>/<%= interface[:prefix] %>;
-<% end -%>
-<% @ipv6_clients.sort.each do |address| -%>
-	<%= address %>/128;
-<% end -%>
-};
-
 options {
         # Directory to use for any working files
 	directory "/var/cache/bind";
 
-<% if node[:bind][:forwarders] -%>
-	# Forward any queries we can't answer
-	forwarders {
-<% node[:bind][:forwarders].each do |forwarder| -%>
-		<%= forwarder %>;
-<% end -%>
-	};
-<% end -%>
-
 	# Only allow queries from our machines
-	allow-query { osm; };
+	allow-query { localnets; };
 
 	# Don't allow transfers
 	allow-transfer { none; };
 
 	# Listen on any IPv6 interfaces
 	listen-on-v6 { any; };
+
+	# Ensure dnssec validation is enabled using embedded trust anchors
+	dnssec-validation auto;
+
+	# Set reasonably memory limit for cache
+	max-cache-size 10%;
+
+	# Ensure dnssec synth is disabled
+	synth-from-dnssec no;
 };
 

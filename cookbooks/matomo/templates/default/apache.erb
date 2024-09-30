@@ -1,0 +1,88 @@
+# DO NOT EDIT - This file is being maintained by Chef
+
+<VirtualHost *:443>
+	ServerName matomo.openstreetmap.org
+	ServerAdmin webmaster@openstreetmap.org
+
+	SSLEngine on
+	SSLCertificateFile /etc/ssl/certs/matomo.openstreetmap.org.pem
+	SSLCertificateKeyFile /etc/ssl/private/matomo.openstreetmap.org.key
+
+	CustomLog /var/log/apache2/matomo.openstreetmap.org-access.log combined_extended
+	ErrorLog /var/log/apache2/matomo.openstreetmap.org-error.log
+
+	Options -Indexes
+
+	DocumentRoot /srv/matomo.openstreetmap.org
+
+	Redirect 403 /core/
+	Redirect 403 /config/
+	Redirect 403 /lang/
+	Redirect 403 /tmp/
+</VirtualHost>
+
+<VirtualHost *:443>
+	ServerName matomo.osm.org
+	ServerAlias piwik.openstreetmap.org
+	ServerAlias piwik.osm.org
+	ServerAdmin webmaster@openstreetmap.org
+
+	SSLEngine on
+	SSLCertificateFile /etc/ssl/certs/matomo.openstreetmap.org.pem
+	SSLCertificateKeyFile /etc/ssl/private/matomo.openstreetmap.org.key
+
+	CustomLog /var/log/apache2/matomo.openstreetmap.org-access.log combined_extended
+	ErrorLog /var/log/apache2/matomo.openstreetmap.org-error.log
+
+	RedirectPermanent / https://matomo.openstreetmap.org/
+</VirtualHost>
+
+<VirtualHost *:80>
+	ServerName matomo.openstreetmap.org
+	ServerAlias matomo.osm.org
+	ServerAlias piwik.openstreetmap.org
+	ServerAlias piwik.osm.org
+	ServerAdmin webmaster@openstreetmap.org
+
+	CustomLog /var/log/apache2/matomo.openstreetmap.org-access.log combined_extended
+	ErrorLog /var/log/apache2/matomo.openstreetmap.org-error.log
+
+	RedirectPermanent /.well-known/acme-challenge/ http://acme.openstreetmap.org/.well-known/acme-challenge/
+	RedirectPermanent / https://matomo.openstreetmap.org/
+</VirtualHost>
+
+<Directory /srv/matomo.openstreetmap.org>
+	Require all granted
+
+	ExpiresActive On
+	RewriteEngine on
+
+	RewriteCond "%{HTTP:Accept-Encoding}" "br"
+	RewriteCond "%{REQUEST_FILENAME}\.br" -s
+	RewriteRule "^(.*)\.js" "$1\.js\.br" [QSA]
+
+	RewriteCond "%{HTTP:Accept-Encoding}" "gzip"
+	RewriteCond "%{REQUEST_FILENAME}\.gz" -s
+	RewriteRule "^(.*)\.js" "$1\.js\.gz" [QSA]
+
+	RewriteRule "\.js\.(br|gz)$"  "-" [T=text/javascript,E=no-gzip:1,E=no-brotli:1]
+
+	<FilesMatch "\.js\.br$">
+		Header append Content-Encoding br
+		Header append Vary Accept-Encoding
+	</FilesMatch>
+
+	<FilesMatch "\.js\.gz$">
+		Header append Content-Encoding gzip
+		Header append Vary Accept-Encoding
+	</FilesMatch>
+
+	<FilesMatch "(\.js|\.js\.gz|\.js\.br)$">
+		ExpiresDefault "access plus 1 week"
+		Header set Cache-Control "max-age=604800"
+	</FilesMatch>
+
+        <FilesMatch ".+\.ph(ar|p|tml)$">
+                SetHandler "proxy:unix:/run/php/php-matomo.openstreetmap.org-fpm.sock|fcgi://127.0.0.1"
+        </FilesMatch>
+</Directory>

@@ -2,14 +2,53 @@
 
 # DO NOT EDIT - This file is being maintained by Chef
 
-args = [
-<% node[:tile][:styles].each do |name,details| -%>
-  "-t", "/srv/tile.openstreetmap.org/tiles/<%= name %>",
+require "fileutils"
+
+tileDirs = [
+<% node[:tile][:styles].each_key do |name| -%>
+  "/srv/tile.openstreetmap.org/tiles/<%= name %>",
 <% end -%>
-  "--min", "13",
-  "--max", "<%= node[:tile][:styles].collect { |n,d| d[:max_zoom] }.max %>"
 ]
 
-Dir.glob("/var/lib/replicate/expire-queue/changes-*.gz").sort.each do |f|
-   system("/usr/local/bin/expire-tiles-single", *args, f) && File::unlink(f)
+tilesExpired = 0
+tilesIgnored = 0
+
+expiredTime = Time.new(2000, 1, 1)
+
+Dir.glob("/var/lib/replicate/expire-queue/changes-*.txt").sort.each do |f|
+  File.open(f, "r") do |file|
+    file.each do |line|
+      z, x, y = line.split("/")
+
+      z = z.to_i + 3
+      x = x.to_i * 8
+      y = y.to_i * 8
+
+      hash = []
+
+      1.upto(5) do
+        hash.push(((x & 0xf) << 4) | (y & 0xf))
+
+        x = x >> 4
+        y = y >> 4
+      end
+
+      tileName = "#{z}/#{hash[4]}/#{hash[3]}/#{hash[2]}/#{hash[1]}/#{hash[0]}.meta"
+
+      tileDirs.each do |tileDir|
+        if File.exist?("#{tileDir}/#{tileName}")
+          FileUtils.touch("#{tileDir}/#{tileName}", :mtime => expiredTime)
+
+          tilesExpired = tilesExpired + 1
+        else
+          tilesIgnored = tilesIgnored + 1
+        end
+      end
+    end
+  end
+
+  File::unlink(f)
 end
+
+puts "Meta tiles expired: #{tilesExpired}"
+puts "Meta tiles not present: #{tilesIgnored}"
