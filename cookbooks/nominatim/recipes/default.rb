@@ -24,6 +24,8 @@ if platform?("debian")
   include_recipe "postgresql"
   include_recipe "python"
   include_recipe "nginx"
+  include_recipe "git"
+  include_recipe "fail2ban"
 
   basedir = data_bag_item("accounts", "nominatim")["home"]
   project_directory = "#{basedir}/planet-project"
@@ -122,79 +124,15 @@ if platform?("debian")
     interpreter "/usr/bin/python3"
   end
 
-  # Force versions for all dependencies to avoid bad surprises.
-  python_package "SQLAlchemy" do
-    python_virtualenv python_directory
-    version "2.0.35"
-  end
-
-  python_package "PyICU" do
-    python_virtualenv python_directory
-    version "2.13.1"
-  end
-
-  python_package "psycopg[binary]" do
-    python_virtualenv python_directory
-    version "3.2.2"
-  end
-
-  python_package "python-dotenv" do
-    python_virtualenv python_directory
-    version "1.0.1"
-  end
-
-  python_package "pygments" do
-    python_virtualenv python_directory
-    version "2.18.0"
-  end
-
-  python_package "PyYAML" do
-    python_virtualenv python_directory
-    version "6.0.2"
-  end
-
-  python_package "falcon" do
-    python_virtualenv python_directory
-    version "3.1.3"
-  end
-
-  python_package "uvicorn" do
-    python_virtualenv python_directory
-    version "0.30.6"
-  end
-
-  python_package "gunicorn" do
-    python_virtualenv python_directory
-    version "23.0.0"
-  end
-
-  python_package "jinja2" do
-    python_virtualenv python_directory
-    version "3.1.4"
-  end
-
-  python_package "datrie" do
-    python_virtualenv python_directory
-    version "0.8.2"
-  end
-
-  python_package "psutil" do
-    python_virtualenv python_directory
-    version "6.0.0"
-  end
-
-  python_package "osmium" do
-    python_virtualenv python_directory
-    version "4.0.0"
-  end
-
   # These are updated during the database update.
   python_package "nominatim-db" do
     python_virtualenv python_directory
+    extra_index_url node[:nominatim][:pip_index]
   end
 
   python_package "nominatim-api" do
     python_virtualenv python_directory
+    extra_index_url node[:nominatim][:pip_index]
   end
 
   remote_directory "#{project_directory}/static-website" do
@@ -313,6 +251,130 @@ if platform?("debian")
     owner "root"
     group "root"
     mode "644"
+  end
+
+  ### Import, update and maintenance scripts
+
+  %w[nominatim-update
+     nominatim-update-data
+     nominatim-update-refresh-db
+     nominatim-daily-maintenance].each do |fname|
+    template "#{bin_directory}/#{fname}" do
+    source "#{fname}.erb"
+      owner "nominatim"
+      group "nominatim"
+      mode "554"
+      variables :bindir => bin_directory,
+                :projectdir => project_directory,
+                :venvprefix => "#{python_directory}/",
+                :qadatadir => qa_data_directory
+    end
+  end
+
+  systemd_service "nominatim-update" do
+    description "Update the Nominatim database"
+    exec_start "#{bin_directory}/nominatim-update"
+    restart "on-success"
+    standard_output "append:#{node[:nominatim][:logdir]}/update.log"
+    standard_error "inherit"
+    working_directory project_directory
+  end
+
+  systemd_service "nominatim-update-maintenance-trigger" do
+    description "Trigger daily maintenance tasks for Nominatim DB"
+    exec_start "ln -sf #{bin_directory}/nominatim-daily-maintenance #{bin_directory}/maintenance/"
+    user "nominatim"
+  end
+
+  systemd_timer "nominatim-update-maintenance-trigger" do
+    action node[:nominatim][:state] != "off" ? :create : :delete
+    description "Schedule daily maintenance tasks for Nominatim DB"
+    on_calendar "*-*-* 02:03:00 UTC"
+  end
+
+  service "nominatim-update-maintenance-trigger" do
+    action node[:nominatim][:state] != "off" ? :enable : :disable
+  end
+
+  ## Nominatim UI
+
+  git ui_directory do
+    action :sync
+    repository node[:nominatim][:ui_repository]
+    revision node[:nominatim][:ui_revision]
+    user "nominatim"
+    group "nominatim"
+  end
+
+  template "#{ui_directory}/dist/theme/config.theme.js" do
+    source "ui-config.js.erb"
+    owner "nominatim"
+    group "nominatim"
+    mode "664"
+  end
+
+  ## Nominatim QA
+
+  if node[:nominatim][:enable_qa_tiles]
+    python_package "nominatim-data-analyser" do
+      python_virtualenv python_directory
+      extra_index_url node[:nominatim][:pip_index]
+    end
+
+    directory qa_data_directory do
+      owner "nominatim"
+      group "nominatim"
+      mode "755"
+      recursive true
+    end
+
+    template "#{project_directory}/qa-config.yaml" do
+      source "qa_config.erb"
+      owner "nominatim"
+      group "nominatim"
+      mode "755"
+      variables :outputdir => "#{qa_data_directory}/new"
+    end
+
+    ssl_certificate "qa-tile.nominatim.openstreetmap.org" do
+      domains ["qa-tile.nominatim.openstreetmap.org"]
+      notifies :reload, "service[nginx]"
+    end
+
+    nginx_site "qa-tiles.nominatim" do
+      template "nginx-qa-tiles.erb"
+      directory qa_data_directory
+      variables :qa_data_directory => qa_data_directory
+    end
+  end
+
+  ## Logging and monitoring
+
+  template "/etc/logrotate.d/nominatim" do
+    source "logrotate.nominatim.erb"
+    owner "root"
+    group "root"
+    mode "644"
+  end
+
+  prometheus_exporter "nominatim" do
+    port 8082
+    user "www-data"
+    restrict_address_families "AF_UNIX"
+    options [
+      "--nominatim.query-log=#{node[:nominatim][:logdir]}/query.log",
+      "--nominatim.database-name=#{node[:nominatim][:dbname]}"
+    ]
+  end
+
+  frontend_addresses = frontends.collect { |f| f.ipaddresses(:role => :external) }
+
+  fail2ban_jail "nominatim_limit_req" do
+    filter "nginx-limit-req"
+    logpath "#{node[:nominatim][:logdir]}/nominatim.openstreetmap.org-error.log"
+    ports [80, 443]
+    maxretry 20
+    ignoreips frontend_addresses.flatten.sort
   end
 
 

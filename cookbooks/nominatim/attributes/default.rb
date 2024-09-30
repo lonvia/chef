@@ -5,6 +5,7 @@ default[:nominatim][:dbname] = "nominatim"
 default[:nominatim][:tablespaces] = []
 default[:nominatim][:postgis] = "3"
 default[:nominatim][:logdir] = "/var/log/nominatim"
+default[:nominatim][:pip_index] = "https://nominatim.org/data/osm-production"
 default[:nominatim][:repository] = "https://git.openstreetmap.org/public/nominatim.git"
 default[:nominatim][:revision] = "deploy"
 default[:nominatim][:enable_backup] = false
