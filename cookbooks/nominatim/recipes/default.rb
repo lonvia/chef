@@ -79,13 +79,6 @@ if platform?("debian")
     mode "664"
   end
 
-  file "#{node[:nominatim][:logdir]}/update.log" do
-    action :create_if_missing
-    owner "nominatim"
-    group "adm"
-    mode "664"
-  end
-
   ### Postgresql
 
   postgresql_version = node[:nominatim][:dbcluster].split("/").first
@@ -266,7 +259,7 @@ if platform?("debian")
       mode "554"
       variables :bindir => bin_directory,
                 :projectdir => project_directory,
-                :venvprefix => "#{python_directory}/",
+                :venvprefix => "#{python_directory}/bin/",
                 :qadatadir => qa_data_directory
     end
   end
@@ -275,7 +268,7 @@ if platform?("debian")
     description "Update the Nominatim database"
     exec_start "#{bin_directory}/nominatim-update"
     restart "on-success"
-    standard_output "append:#{node[:nominatim][:logdir]}/update.log"
+    standard_output "journal"
     standard_error "inherit"
     working_directory project_directory
   end
