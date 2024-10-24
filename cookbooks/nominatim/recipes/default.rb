@@ -204,7 +204,7 @@ if platform?("debian")
     working_directory project_directory
     standard_output "append:#{node[:nominatim][:logdir]}/gunicorn.log"
     standard_error "inherit"
-    exec_start "#{python_directory}/bin/gunicorn --max-requests 200000 -b unix:/run/gunicorn-nominatim.openstreetmap.org.sock -w #{node[:nominatim][:api_workers]} -k uvicorn.workers.UvicornWorker nominatim_api.server.falcon.server:run_wsgi"
+    exec_start "#{python_directory}/bin/gunicorn --max-requests 200000 -b unix:/run/gunicorn-nominatim.openstreetmap.org.sock -w #{node[:nominatim][:api_workers]} -k uvicorn.workers.UvicornWorker 'nominatim_api.server.falcon.server:run_wsgi()'"
     exec_reload "/bin/kill -s HUP $MAINPID"
     kill_mode "mixed"
     timeout_stop_sec 5

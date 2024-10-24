@@ -32,9 +32,7 @@ starttime=`date +%s`
     pushd <%= @builddir %>
     make install
 
-  <% if node[:nominatim][:api_flavour] == "python" -%>
     systemctl reload nominatim
-  <% end -%>
   fi
   <% end -%>
 <% end -%>
