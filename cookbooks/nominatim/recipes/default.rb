@@ -62,7 +62,6 @@ if platform?("debian")
     mode "775"
   end
 
-
   ## Log directory setup
 
   directory node[:nominatim][:logdir] do
@@ -253,7 +252,7 @@ if platform?("debian")
      nominatim-update-refresh-db
      nominatim-daily-maintenance].each do |fname|
     template "#{bin_directory}/#{fname}" do
-    source "#{fname}.erb"
+      source "#{fname}.erb"
       owner "nominatim"
       group "nominatim"
       mode "554"
@@ -359,17 +358,6 @@ if platform?("debian")
       "--nominatim.database-name=#{node[:nominatim][:dbname]}"
     ]
   end
-
-  frontend_addresses = frontends.collect { |f| f.ipaddresses(:role => :external) }
-
-  fail2ban_jail "nominatim_limit_req" do
-    filter "nginx-limit-req"
-    logpath "#{node[:nominatim][:logdir]}/nominatim.openstreetmap.org-error.log"
-    ports [80, 443]
-    maxretry 20
-    ignoreips frontend_addresses.flatten.sort
-  end
-
 
 ################################# END OF DEBIAN #############################
 
@@ -999,15 +987,14 @@ else
   end
 
   include_recipe "fail2ban"
-
-  frontend_addresses = frontends.collect { |f| f.ipaddresses(:role => :external) }
-
-  fail2ban_jail "nominatim_limit_req" do
-    filter "nginx-limit-req"
-    logpath "#{node[:nominatim][:logdir]}/nominatim.openstreetmap.org-error.log"
-    ports [80, 443]
-    maxretry 20
-    ignoreips frontend_addresses.flatten.sort
-  end
-
 end # platform?('debian')
+
+frontend_addresses = frontends.collect { |f| f.ipaddresses(:role => :external) }
+
+fail2ban_jail "nominatim_limit_req" do
+  filter "nginx-limit-req"
+  logpath "#{node[:nominatim][:logdir]}/nominatim.openstreetmap.org-error.log"
+  ports [80, 443]
+  maxretry 20
+  ignoreips frontend_addresses.flatten.sort
+end
